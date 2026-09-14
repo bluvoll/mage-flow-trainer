@@ -149,7 +149,8 @@ class Trainer:
         self.accelerator = Accelerator(
             gradient_accumulation_steps=cfg.train.gradient_accumulation_steps,
             log_with=None,
-            kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)],
+            kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True),
+                             self._process_group_kwargs()],
             mixed_precision="no",
             dynamo_plugin=self._dynamo_plugin(),
         )
@@ -464,43 +465,68 @@ class Trainer:
         torch.cuda.empty_cache()
         self.text_cache = cache
 
+    @staticmethod
+    def _process_group_kwargs():
+        from datetime import timedelta
+        from accelerate.utils import InitProcessGroupKwargs
+
+        return InitProcessGroupKwargs(timeout=timedelta(minutes=30))
+
     def _build_variation_cache(self):
         import gc
+        from contextlib import nullcontext
+        from accelerate.utils import broadcast_object_list
         from ..data.caption_variations import CaptionVariationCache, encoder_fingerprint
         cfg = self.cfg
         default_root = Path(cfg.dataset.effective_subsets()[0].path)
         path = cfg.train.caption_cache_path or str(default_root / "caption_variations.sqlite")
         from filelock import FileLock
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        # Only the main rank writes/encodes. Every other rank waits, then opens read-only.
-        with self.accelerator.main_process_first(), FileLock(str(path) + ".lock"):
-            cache = CaptionVariationCache(path, encoder_fingerprint(cfg, path))
-            cache.prepare(self.dataset.entries, cfg.dataset.caption, cfg.train.seed,
-                          cfg.train.caption_variations, write=self.accelerator.is_main_process)
-            if self.accelerator.is_main_process:
+        accelerator = self.accelerator
+        # Rank 0 holds the job-level lock until all ranks finish. Workers in this
+        # job coordinate through SQLite's short transactions, not this file lock.
+        lock = FileLock(str(path) + ".lock") if accelerator.is_main_process else nullcontext()
+        with lock:
+            key = [encoder_fingerprint(cfg, path) if accelerator.is_main_process else None]
+            if accelerator.num_processes > 1:
+                broadcast_object_list(key)
+            cache = CaptionVariationCache(path, key[0])
+            if accelerator.is_main_process:
+                cache.prepare(self.dataset.entries, cfg.dataset.caption, cfg.train.seed,
+                              cfg.train.caption_variations)
                 self.accelerator.print(f"caption cache {cache.statistics}")
-                iterator = iter(cache.pending())
-                first = next(iterator, None)
-                if first is not None:
-                    from itertools import chain
-                    components = load_components(cfg.train.model_path, self.dtype, **model_load_kwargs(cfg.train),
-                        load_transformer=False, load_vae=False)
-                    if cfg.quant.quantize_text_encoder and cfg.quant.mode != "none":
-                        q = text_encoder_quant_config(cfg.quant)
-                        components.text_encoder = quantize_module(components.text_encoder, q,
-                            self.accelerator.device, self.dtype, False)
-                    components.text_encoder.to(self.accelerator.device).eval()
-                    with cache.writer() as db:
-                        for number, (key, caption) in enumerate(tqdm(chain([first], iterator), desc="Caching caption variations"), 1):
-                            hidden, mask = encode_prompts(components, [caption], self.accelerator.device,
-                                                         cfg.train.max_text_tokens)
-                            cache.add(key, hidden, mask, db=db)
-                            if number % 64 == 0:
-                                db.commit()
-                    db.close()
-                    del hidden, mask, components
-                    gc.collect()
-                    torch.cuda.empty_cache()
+            accelerator.wait_for_everyone()
+            if not accelerator.is_main_process:
+                cache.prepare(self.dataset.entries, cfg.dataset.caption, cfg.train.seed,
+                              cfg.train.caption_variations, write=False)
+            iterator = iter(cache.pending(accelerator.process_index, accelerator.num_processes))
+            first = next(iterator, None)
+            if first is not None:
+                from itertools import chain
+                components = load_components(cfg.train.model_path, self.dtype, **model_load_kwargs(cfg.train),
+                    load_transformer=False, load_vae=False)
+                if cfg.quant.quantize_text_encoder and cfg.quant.mode != "none":
+                    q = text_encoder_quant_config(cfg.quant)
+                    components.text_encoder = quantize_module(components.text_encoder, q,
+                        self.accelerator.device, self.dtype, False)
+                components.text_encoder.to(self.accelerator.device).eval()
+                with cache.writer() as db:
+                    for key, caption in tqdm(chain([first], iterator),
+                                             desc=f"Caching captions rank {accelerator.process_index}",
+                                             position=accelerator.process_index):
+                        hidden, mask = encode_prompts(components, [caption], self.accelerator.device,
+                                                     cfg.train.max_text_tokens)
+                        cache.add(key, hidden, mask, db=db)
+                        # Never hold SQLite's writer lock during GPU encoding.
+                        # Each rank commits before its next forward pass.
+                        db.commit()
+                db.close()
+                del hidden, mask, components
+                gc.collect()
+                torch.cuda.empty_cache()
+            accelerator.wait_for_everyone()
+            if accelerator.is_main_process and next(cache.pending(), None) is not None:
+                raise RuntimeError("Distributed caption cache is incomplete")
         cache.close()
         self.dataset.caption_variation_cache = cache
         self.text_cache = cache

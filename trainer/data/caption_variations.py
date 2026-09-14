@@ -220,7 +220,9 @@ class CaptionVariationCache:
             )
         db.close()
 
-    def pending(self):
+    def pending(self, rank=0, world_size=1):
+        if world_size < 1 or not 0 <= rank < world_size:
+            raise ValueError("Invalid caption-cache rank/world_size")
         # Keyset pagination avoids both an unbounded list and a long read transaction during writes.
         last = ""
         while True:
@@ -236,7 +238,10 @@ class CaptionVariationCache:
             if not rows:
                 break
             for key, text in rows:
-                yield key, text
+                # Stable ownership even while other ranks delete completed rows.
+                # Offset/modulo on row numbers would skip work as the table shrinks.
+                if int(key[:16], 16) % world_size == rank:
+                    yield key, text
             last = rows[-1][0]
 
     def add(self, key, hidden, mask, db=None):

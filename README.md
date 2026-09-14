@@ -88,6 +88,8 @@ caption_cache_path = ""
 
 The number of variations controls deterministic augmentation attempts per image. Exact caption matches share one embedding, while duplicate selection slots retain their probability. Training cycles through shuffled variation slots across image visits; the cache does not grow with epoch count. Caption dropout uses a shared empty-caption embedding. A complete, compatible cache skips loading the text encoder on subsequent runs.
 
+Under DDP, missing embeddings are split across all selected GPUs and committed to the shared SQLite cache. The distributed timeout is 30 minutes; cached entries are reusable when changing the number of GPUs.
+
 Storage depends on the **actual unpadded token count**, not just the number of variations. A BF16 embedding with 2,560 features costs `tokens × 2,560 × 2` bytes. The following projection assumes **200 tokens per unique variation**, no deduplication, one cached image resolution, and excludes SQLite metadata and filesystem overhead.
 
 | Unique variations per image | Text cache / image | Text + 1024² latent / image | Text cache / 20,000 images |
