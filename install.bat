@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem Anima trainer installer -- Windows.
+rem Mage-Flow trainer installer -- Windows.
 rem
 rem   install.bat              install into .\venv and write .\start-gui.bat
 rem   install.bat --recreate   delete an existing .\venv first
@@ -11,7 +11,7 @@ rem managed by uv against uv.lock, and an installed copy must not silently take 
 cd /d "%~dp0"
 
 set "VENV=venv"
-rem The diffusers commit this trainer was verified against. Anima support only exists on main, so
+rem The diffusers commit this trainer was verified against. SDNQ integration is pinned to this revision, so
 rem there is no release to pin to -- but floating HEAD means an install can break without a single
 rem local change. Matches uv.lock; bump both together after re-running the parity gates.
 set "DIFFUSERS_REF=50e7158093710f9c1b4ea9ff100137a91c9228f3"
@@ -123,23 +123,20 @@ if not errorlevel 1 (
 rem ---------------------------------------------------------------- launchers
 rem `convert_model` opens its window when given no arguments, so both launchers forward %* rather
 rem than hardcoding --gui: a bare double-click still opens the GUI, and CLI flags keep working.
-call :launcher start-gui.bat       anima.gui                 "Start the Anima trainer GUI."
-call :launcher start-converter.bat anima.tools.convert_model "Convert single-file Anima checkpoints into a diffusers repo."
+call :launcher start-gui.bat       trainer.gui                 "Start the Mage-Flow trainer GUI."
 
 rem ---------------------------------------------------------------- report
 echo.
 echo ==^> checking the install
-"%VPY%" "%~dp0anima\tools\check_install.py" --require-gui
+"%VPY%" "%~dp0trainer\tools\check_install.py" --require-gui
 if errorlevel 1 exit /b 1
 
 echo.
 echo ==^> done.  Start the GUI with:  start-gui.bat
-echo     convert a single-file checkpoint:  start-converter.bat
-echo     or the CLI:  venv\Scripts\python.exe -m anima.training.train configs\your.toml
+echo     or the CLI:  venv\Scripts\python.exe -m trainer.training.train configs\your.toml
 exit /b 0
 
 :help
-echo install.bat              install into .\venv, write start-gui.bat and start-converter.bat
 echo install.bat --recreate   delete an existing .\venv first
 exit /b 0
 

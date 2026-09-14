@@ -1,0 +1,205 @@
+[
+  {
+    "variant": "Cached Text Encoder \u2014 INT8, BF16 adapters, default policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": true,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "default",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.bfloat16": 42467328
+    },
+    "initialization_seconds": 9.135315232999346,
+    "initialization": {
+      "allocated_bytes": 4264019456,
+      "reserved_bytes": 4934598656,
+      "peak_allocated_bytes": 4957717504,
+      "peak_reserved_bytes": 5255462912
+    },
+    "training_peak_allocated_gib": 5.402618885040283,
+    "training_peak_reserved_gib": 5.60546875,
+    "warm_median_seconds": 0.8389007759997185,
+    "empty_caption_steps": 0,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8489410281181335,
+    "variant_id": "cached-int8-default-bf16",
+    "text_encoder_mode": "Cached Text Encoder"
+  },
+  {
+    "variant": "Cached Text Encoder \u2014 INT8, FP32 adapters, default policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": true,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "default",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.float32": 42467328
+    },
+    "initialization_seconds": 9.303407964999678,
+    "initialization": {
+      "allocated_bytes": 4348954112,
+      "reserved_bytes": 4938792960,
+      "peak_allocated_bytes": 4957717504,
+      "peak_reserved_bytes": 5255462912
+    },
+    "training_peak_allocated_gib": 5.82246732711792,
+    "training_peak_reserved_gib": 6.1015625,
+    "warm_median_seconds": 0.9106711350004844,
+    "empty_caption_steps": 0,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8775281310081482,
+    "variant_id": "cached-int8-default",
+    "text_encoder_mode": "Cached Text Encoder"
+  },
+  {
+    "variant": "Cached Text Encoder \u2014 INT8, FP32 adapters, all_adaln policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": true,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "all_adaln",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.float32": 42467328
+    },
+    "initialization_seconds": 9.38734313399982,
+    "initialization": {
+      "allocated_bytes": 5702600192,
+      "reserved_bytes": 5729419264,
+      "peak_allocated_bytes": 5702600192,
+      "peak_reserved_bytes": 5729419264
+    },
+    "training_peak_allocated_gib": 7.08314847946167,
+    "training_peak_reserved_gib": 7.326171875,
+    "warm_median_seconds": 0.9225864300001376,
+    "empty_caption_steps": 0,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.878301739692688,
+    "variant_id": "cached-int8",
+    "text_encoder_mode": "Cached Text Encoder"
+  },
+  {
+    "variant": "Loaded Text Encoder \u2014 INT8, BF16 adapters, default policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": false,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "default",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.bfloat16": 42467328
+    },
+    "initialization_seconds": 7.6454870259995005,
+    "initialization": {
+      "allocated_bytes": 9096509440,
+      "reserved_bytes": 9290383360,
+      "peak_allocated_bytes": 9096509440,
+      "peak_reserved_bytes": 9290383360
+    },
+    "training_peak_allocated_gib": 9.907878875732422,
+    "training_peak_reserved_gib": 10.12890625,
+    "warm_median_seconds": 0.903589946500233,
+    "empty_caption_steps": 5,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8533673286437988,
+    "variant_id": "live-int8-default-bf16",
+    "text_encoder_mode": "Loaded Text Encoder"
+  },
+  {
+    "variant": "Loaded Text Encoder \u2014 INT8, FP32 adapters, default policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": false,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "default",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.float32": 42467328
+    },
+    "initialization_seconds": 7.991702140999223,
+    "initialization": {
+      "allocated_bytes": 9181444096,
+      "reserved_bytes": 9294577664,
+      "peak_allocated_bytes": 9181444096,
+      "peak_reserved_bytes": 9294577664
+    },
+    "training_peak_allocated_gib": 10.328022956848145,
+    "training_peak_reserved_gib": 10.625,
+    "warm_median_seconds": 0.9727964780004186,
+    "empty_caption_steps": 5,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8760338425636292,
+    "variant_id": "live-int8-default",
+    "text_encoder_mode": "Loaded Text Encoder"
+  },
+  {
+    "variant": "Loaded Text Encoder \u2014 INT8, FP32 adapters, all_adaln policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": false,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "all_adaln",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.float32": 42467328
+    },
+    "initialization_seconds": 7.870543592000104,
+    "initialization": {
+      "allocated_bytes": 10535090176,
+      "reserved_bytes": 10653532160,
+      "peak_allocated_bytes": 10535090176,
+      "peak_reserved_bytes": 10653532160
+    },
+    "training_peak_allocated_gib": 11.588704109191895,
+    "training_peak_reserved_gib": 11.890625,
+    "warm_median_seconds": 0.9805780364995371,
+    "empty_caption_steps": 5,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8724841475486755,
+    "variant_id": "live-int8",
+    "text_encoder_mode": "Loaded Text Encoder"
+  },
+  {
+    "variant": "Loaded Text Encoder (CPU offload) \u2014 INT8, FP32 adapters, all_adaln policy",
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sample_count": 10,
+    "cache_text_embeddings": false,
+    "offload_text_encoder": true,
+    "quant_dtype": "int8",
+    "skip_policy": "all_adaln",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.float32": 42467328
+    },
+    "initialization_seconds": 9.650840812000752,
+    "initialization": {
+      "allocated_bytes": 5694080512,
+      "reserved_bytes": 7459569664,
+      "peak_allocated_bytes": 7106347008,
+      "peak_reserved_bytes": 7459569664
+    },
+    "training_peak_allocated_gib": 9.9415922164917,
+    "training_peak_reserved_gib": 10.029296875,
+    "warm_median_seconds": 3.010414532500363,
+    "empty_caption_steps": 5,
+    "optimizer_steps": 20,
+    "maximum_loss": 0.8720072507858276,
+    "variant_id": "live-offload-int8",
+    "text_encoder_mode": "Loaded Text Encoder (CPU offload)"
+  }
+]

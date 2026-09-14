@@ -1,0 +1,27 @@
+[train]
+model_path = "mage-flow"
+run_name = "mageflow-packed"
+attention_backend = "torch_varlen"
+pack_resolutions = true
+batch_size = 2
+max_text_tokens = 512
+gradient_checkpointing = true
+
+[dataset]
+path = "/path/to/images"
+source = "encode"
+resolutions = [512, 768, 1024]
+
+[adapter]
+kind = "lora"
+rank = 32
+alpha = 32
+
+[quant]
+mode = "frozen"
+weights_dtype = "int8"
+quantize_text_encoder = true
+skip_policy = "all_adaln"
+
+[optimizer]
+lr = 1e-4

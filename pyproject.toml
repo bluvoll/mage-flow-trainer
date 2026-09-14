@@ -1,7 +1,7 @@
 [project]
-name = "anima-trainer"
+name = "mageflow-trainer"
 version = "0.1.0"
-description = "Diffusers-native trainer for Anima (Cosmos-Predict2 trunk + LLMAdapter)"
+description = "Mage-Flow trainer with SDNQ quantized training"
 # 3.11 is what every measurement in the README was taken on, and what the installer picks when
 # both are present. 3.12 is supported because torch 2.10.0+cu128 ships cp312 wheels for linux
 # x86_64 and win_amd64 and the whole graph resolves (verified with `uv lock --python 3.12`), but
@@ -30,6 +30,8 @@ dependencies = [
     "transformers>=4.51",  # >=4.51 for Qwen3
     "accelerate",
     "peft",
+    "lycoris-lora",
+    "filelock",
     "safetensors",
     "sentencepiece",       # T5TokenizerFast slow-tokenizer fallback
     "numpy",
@@ -37,6 +39,7 @@ dependencies = [
     "tqdm",
     "toml",
     "einops",
+    "loguru",
     "openvino>=2026.3.0",
     # torch.compile's inductor backend shells out to a C++ compiler and imports setuptools to do
     # it. Without this, `train.compile` dies at the first step with a bare
@@ -45,13 +48,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Cosine optimal-transport noise pairing (models/anima.py:39). CPU fallback is scipy.
+# Cosine optimal-transport noise pairing (models/trainer.py:39). CPU fallback is scipy.
 ot = ["scipy"]
 gui = [
     "pyside6>=6.11.1",
 ]
 
 [tool.uv.sources]
+lycoris-lora = { git = "https://github.com/KohakuBlueleaf/LyCORIS", rev = "4a6a333819356795d22170fe661a84f16b299b6b" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 diffusers = { git = "https://github.com/huggingface/diffusers" }
@@ -66,4 +70,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["anima*"]
+include = ["trainer*"]
+
+[tool.setuptools.package-data]
+trainer = ["modeling/LICENSE.*", "modeling/modules/LICENSE.*", "modeling/assets/*.json", "modeling/assets/qwen3vl4b/*", "gui/LICENSE.*"]

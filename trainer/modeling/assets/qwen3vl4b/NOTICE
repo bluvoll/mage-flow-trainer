@@ -1,0 +1,4 @@
+Qwen3-VL-4B-Instruct configuration and tokenizer assets
+Source: Qwen/Qwen3-VL-4B-Instruct (as distributed with the local Mage-Flow model).
+License: Apache License 2.0; see LICENSE.
+These are tokenizer/configuration assets only; no model weights are included.

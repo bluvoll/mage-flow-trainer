@@ -1,0 +1,67 @@
+# Full transformer finetuning: 10-step smoke test, not an adapter run.
+[adapter]
+kind = "none"
+
+[preserve]
+prompts = ""
+
+[dataset]
+path = "/path/to/bisque"
+source = "latents"
+max_bucket_reso = 4096
+resolution = 1024
+
+[train]
+model_path = "mage-flow"
+output_dir = "output"
+run_name = "mageflow-full-finetune-smoke"
+epochs = 1
+batch_size = 1
+gradient_accumulation_steps = 1
+pack_resolutions = true
+attention_backend = "torch_varlen"
+cache_text_embeddings = true
+caption_variations = 5
+caption_cache_path = ""
+compile = "default"
+dtype = "bfloat16"
+max_steps = 10
+log_every = 1
+num_workers = 0
+progress = "plain"
+save_every_epochs = 0
+save_every_steps = 0
+skip_final_save = true
+save_optimizer_state = false
+
+[optimizer]
+kind = "adamw8bit"
+lr = 2e-5
+use_kahan = true
+quantize_state = true
+offload_state = true
+
+[schedule]
+kind = "rex"
+
+[flow]
+hf_exponent = 2.0
+
+[quant]
+mode = "training"
+skip_policy = "all_adaln"
+quantize_text_encoder = true
+weights_dtype = "int8"
+use_quantized_matmul = false
+
+[component_lr]
+adaln = 2e-5
+base = 2e-5
+
+[dataset.caption]
+caption_mode = "mixed"
+shuffle_tags = true
+tag_dropout_percent = 0.1
+caption_dropout_percent = 0.1
+protected_tags = []
+nl_shuffle_sentences = true

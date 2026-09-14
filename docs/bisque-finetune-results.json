@@ -1,0 +1,362 @@
+{
+  "physical_gpu": 1,
+  "training": {
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "rank_process": 0,
+    "world_size": 1,
+    "adapter": "none",
+    "algorithm": null,
+    "resolution": 1024,
+    "batch_size": 1,
+    "text_encoder_mode": "Cached Text Encoder",
+    "status": "ok",
+    "sample_count": 384,
+    "cache_text_embeddings": true,
+    "offload_text_encoder": false,
+    "quant_dtype": "int8",
+    "skip_policy": "all_adaln",
+    "rank": 32,
+    "trainable_parameter_dtypes": {
+      "torch.bfloat16": 4115745408
+    },
+    "initialization_seconds": 143.4217136590005,
+    "initialization": {
+      "allocated_bytes": 5533255168,
+      "reserved_bytes": 5572132864,
+      "peak_allocated_bytes": 5533255168,
+      "peak_reserved_bytes": 5572132864
+    },
+    "training_peak_allocated_gib": 14.27714490890503,
+    "training_peak_reserved_gib": 16.310546875,
+    "warm_median_seconds": 6.749232255000152,
+    "empty_caption_count": 0,
+    "empty_caption_steps": 0,
+    "steps": [
+      {
+        "step": 1,
+        "epoch": 0,
+        "seconds": 101.44889424699977,
+        "loss": 0.2986355721950531,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          835
+        ],
+        "text_seconds": 0.00399925199963036,
+        "text_tokens": [
+          194
+        ],
+        "after_text_allocated_bytes": 5540999680,
+        "allocated_bytes": 5553801216,
+        "reserved_bytes": 17494441984,
+        "peak_allocated_bytes": 15329967616,
+        "peak_reserved_bytes": 17494441984
+      },
+      {
+        "step": 2,
+        "epoch": 0,
+        "seconds": 6.793951161000223,
+        "loss": 0.4344310760498047,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          349
+        ],
+        "text_seconds": 0.001958433999789122,
+        "text_tokens": [
+          93
+        ],
+        "after_text_allocated_bytes": 5557850112,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17502830592,
+        "peak_allocated_bytes": 15329472000,
+        "peak_reserved_bytes": 17502830592
+      },
+      {
+        "step": 3,
+        "epoch": 0,
+        "seconds": 6.741717394000261,
+        "loss": 0.6257798075675964,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          696
+        ],
+        "text_seconds": 0.002450301999488147,
+        "text_tokens": [
+          156
+        ],
+        "after_text_allocated_bytes": 5558172672,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15329005056,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 4,
+        "epoch": 0,
+        "seconds": 6.790061611000056,
+        "loss": 0.6014488339424133,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          1030
+        ],
+        "text_seconds": 0.0030743120005354285,
+        "text_tokens": [
+          231
+        ],
+        "after_text_allocated_bytes": 5559438336,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328611840,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 5,
+        "epoch": 0,
+        "seconds": 6.7591217529998175,
+        "loss": 0.30118075013160706,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          526
+        ],
+        "text_seconds": 0.00165528399975301,
+        "text_tokens": [
+          111
+        ],
+        "after_text_allocated_bytes": 5557942272,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328218624,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 6,
+        "epoch": 0,
+        "seconds": 6.73079812800006,
+        "loss": 0.35225340723991394,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          456
+        ],
+        "text_seconds": 0.0019083769993812894,
+        "text_tokens": [
+          103
+        ],
+        "after_text_allocated_bytes": 5557901312,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15329005056,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 7,
+        "epoch": 0,
+        "seconds": 6.737384203000147,
+        "loss": 0.37113404273986816,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          225
+        ],
+        "text_seconds": 0.001897927000754862,
+        "text_tokens": [
+          64
+        ],
+        "after_text_allocated_bytes": 5557701632,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328611840,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 8,
+        "epoch": 0,
+        "seconds": 6.738009213000623,
+        "loss": 0.2717996835708618,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          271
+        ],
+        "text_seconds": 0.0020254789997125044,
+        "text_tokens": [
+          73
+        ],
+        "after_text_allocated_bytes": 5557747712,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328218624,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 9,
+        "epoch": 0,
+        "seconds": 6.785192594999899,
+        "loss": 0.35710787773132324,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          846
+        ],
+        "text_seconds": 0.0025359169994771946,
+        "text_tokens": [
+          182
+        ],
+        "after_text_allocated_bytes": 5558305792,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328611840,
+        "peak_reserved_bytes": 17513316352
+      },
+      {
+        "step": 10,
+        "epoch": 0,
+        "seconds": 6.756747116000042,
+        "loss": 0.30093491077423096,
+        "batch_size": 1,
+        "bucket": [
+          [
+            1344,
+            768
+          ]
+        ],
+        "empty_captions": 0,
+        "caption_characters": [
+          278
+        ],
+        "text_seconds": 0.0024076150002656505,
+        "text_tokens": [
+          74
+        ],
+        "after_text_allocated_bytes": 5557752832,
+        "allocated_bytes": 5553244160,
+        "reserved_bytes": 17513316352,
+        "peak_allocated_bytes": 15328218624,
+        "peak_reserved_bytes": 17513316352
+      }
+    ]
+  },
+  "dtype_audit": {
+    "parameters": [
+      {
+        "type": "Parameter",
+        "dtype": "torch.bfloat16",
+        "device": "cuda:0",
+        "elements": 1397836416
+      },
+      {
+        "type": "SDNQTensor",
+        "dtype": "torch.bfloat16",
+        "device": "cuda:0",
+        "elements": 2717908992
+      }
+    ],
+    "quantized_storage": [
+      {
+        "type": "Tensor",
+        "dtype": "torch.int8",
+        "device": "cuda:0",
+        "elements": 2717908992
+      }
+    ],
+    "trainable_parameters": 4115745408,
+    "frozen_parameters": 0,
+    "text_encoder_loaded": false,
+    "mixed_precision": "no",
+    "gradients": [
+      {
+        "type": "Tensor",
+        "dtype": "torch.bfloat16",
+        "device": "cuda:0",
+        "elements": 4115745408
+      }
+    ],
+    "weight_update_probe": {
+      "name": "transformer_blocks.0.attn.to_q.weight",
+      "sample_elements": 4096,
+      "changed_elements": 438,
+      "max_abs_change": 0.0006103515625
+    },
+    "optimizer_state": [
+      {
+        "type": "Tensor",
+        "dtype": "torch.bfloat16",
+        "device": "cpu",
+        "elements": 3399552
+      },
+      {
+        "type": "SDNQTensor",
+        "dtype": "torch.float32",
+        "device": "cpu",
+        "elements": 12343836672
+      }
+    ],
+    "optimizer_quantized_storage": [
+      {
+        "type": "Tensor",
+        "dtype": "torch.uint8",
+        "device": "cpu",
+        "elements": 12343836672
+      }
+    ]
+  }
+}

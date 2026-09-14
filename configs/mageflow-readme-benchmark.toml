@@ -1,0 +1,72 @@
+# Derived from bisque-mageflow-lora-SDQN-AdamW.toml.
+# Benchmark: 10 optimizer steps, batch size 1 per GPU, accumulation 1.
+[adapter]
+init_cache = ""
+kind = "lycoris_lora"
+dtype = "bfloat16"
+lycoris_algo = "locon"
+rank = 32
+alpha = 32
+lycoris_bypass = true
+
+[preserve]
+prompts = ""
+
+[dataset]
+path = "/path/to/cached/dataset"
+source = "latents"
+max_bucket_reso = 8192
+resolution = 1024
+bucket_no_upscale = false
+
+[train]
+model_path = "mage-flow"
+output_dir = "output"
+run_name = "mageflow-readme-benchmark"
+epochs = 2
+batch_size = 1
+gradient_accumulation_steps = 1
+pack_resolutions = true
+attention_backend = "torch_varlen"
+cache_text_embeddings = true
+caption_variations = 5
+caption_cache_path = ""
+compile = "default"
+max_steps = 10
+num_workers = 0
+log_every = 1
+progress = "plain"
+save_every_epochs = 0
+save_every_steps = 0
+skip_final_save = true
+save_optimizer_state = false
+compile_dynamic = true
+gradient_checkpointing = true
+
+[optimizer]
+kind = "adamw8bit"
+lr = 2e-5
+use_kahan = true
+quantize_state = false
+offload_state = false
+
+[schedule]
+kind = "rex"
+
+[flow]
+hf_exponent = 2.0
+
+[quant]
+mode = "frozen"
+weights_dtype = "int8"
+use_quantized_matmul = false
+skip_policy = "all_adaln"
+quantize_text_encoder = true
+
+[dataset.caption]
+caption_mode = "mixed"
+shuffle_tags = true
+tag_dropout_percent = 0.1
+caption_dropout_percent = 0.1
+protected_tags = []
+nl_shuffle_sentences = true

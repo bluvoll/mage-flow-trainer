@@ -1,0 +1,1122 @@
+[
+  {
+    "name": "transformer_blocks.0.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.0.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.1.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.2.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.3.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.4.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.5.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.6.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.7.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.8.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.9.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.add_q_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.attn.to_add_out",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.txt_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.10.txt_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.to_q",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.to_k",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.to_v",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.add_k_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.add_v_proj",
+    "component": "text_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.attn.to_out.0",
+    "component": "image_attn",
+    "shape": [
+      3072,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.img_mlp.net.0.proj",
+    "component": "mlp",
+    "shape": [
+      12288,
+      3072
+    ]
+  },
+  {
+    "name": "transformer_blocks.11.img_mlp.net.2",
+    "component": "mlp",
+    "shape": [
+      3072,
+      12288
+    ]
+  }
+]

@@ -1,0 +1,36 @@
+[train]
+model_path = "mage-flow"
+run_name = "mageflow-lora"
+attention_backend = "torch_varlen"
+# pack_resolutions = true  # mix shapes; increase batch_size to at least 2
+gradient_checkpointing = true
+batch_size = 1
+gradient_accumulation_steps = 4
+max_text_tokens = 512
+# checkpoint_blocks = [0, 2, 4, 6, 8, 10]
+# compile = "default"
+
+[dataset]
+path = "/path/to/images"
+source = "encode"
+resolution = 1024
+
+[adapter]
+kind = "lora"
+rank = 32
+alpha = 32
+components = ["image_attn", "text_attn", "mlp"]
+
+[quant]
+mode = "frozen"
+weights_dtype = "int8"
+use_quantized_matmul = "auto"
+quantize_text_encoder = true
+skip_policy = "all_adaln"
+
+[optimizer]
+kind = "adamw"
+lr = 1e-4
+
+[flow]
+shift = 6.0

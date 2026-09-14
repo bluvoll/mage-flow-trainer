@@ -1,0 +1,62 @@
+{
+  "torch": "2.10.0+cu128",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "results": [
+    {
+      "backend": "sdpa",
+      "lengths": [
+        4160,
+        4608
+      ],
+      "median_forward_backward_ms": 34.82250949991794,
+      "peak_allocated_mb": 607.88671875
+    },
+    {
+      "backend": "torch_varlen",
+      "lengths": [
+        4160,
+        4608
+      ],
+      "median_forward_backward_ms": 16.02900300008514,
+      "peak_allocated_mb": 790.7587890625
+    },
+    {
+      "backend": "sdpa",
+      "lengths": [
+        1088,
+        4608
+      ],
+      "median_forward_backward_ms": 34.985018999805106,
+      "peak_allocated_mb": 607.86328125
+    },
+    {
+      "backend": "torch_varlen",
+      "lengths": [
+        1088,
+        4608
+      ],
+      "median_forward_backward_ms": 9.812885499968615,
+      "peak_allocated_mb": 608.3916015625
+    },
+    {
+      "backend": "sdpa",
+      "lengths": [
+        1088,
+        2112,
+        4160
+      ],
+      "median_forward_backward_ms": 53.89720299990586,
+      "peak_allocated_mb": 822.6279296875
+    },
+    {
+      "backend": "torch_varlen",
+      "lengths": [
+        1088,
+        2112,
+        4160
+      ],
+      "median_forward_backward_ms": 11.150618000101531,
+      "peak_allocated_mb": 806.12646484375
+    }
+  ]
+}

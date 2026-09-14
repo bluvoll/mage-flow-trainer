@@ -19,12 +19,12 @@ output/
 # Your own configs stay local by default. To publish a chosen one:  git add -f configs/<name>.toml
 configs/*.toml
 
-# Reference checkout of Aozora Trainer. The GUI chrome is already vendored into `anima/gui/`
-# with attribution in NOTICE and anima/gui/LICENSE.Aozora, so this copy is redundant, unimported
+# Reference checkout of Aozora Trainer. The GUI chrome is already vendored into `trainer/gui/`
+# with attribution in NOTICE and trainer/gui/LICENSE.Aozora, so this copy is redundant, unimported
 # and 169MB.
 Aozora_Trainer/
 # Not integrated (Phase 7 was never started) and carries its own .git, which would become a
-# broken gitlink. Nothing under anima/ imports it.
+# broken gitlink. Nothing under trainer/ imports it.
 RamTorch/
 
 # Working snapshots and third-party reference docs -- local only.
@@ -42,3 +42,16 @@ Private-README.md
 .mypy_cache/
 .idea/
 .vscode/
+
+# Configs the paired-run pipeline generates from the form; regenerated on every start.
+configs/generated/
+
+# Local model/reference checkouts
+diffusion-pipe-mageflow-ft/
+mage-flow/
+!configs/mageflow-*.toml
+
+# Local dataset subset and benchmark outputs
+benchmarks/kuse-lora/
+
+benchmarks/readme-vram/
