@@ -36,7 +36,7 @@ save_optimizer_state = false
 
 [optimizer]
 kind = "adamw8bit"
-lr = 2e-5
+lr = 2e-6
 use_kahan = true
 quantize_state = true
 offload_state = true
@@ -55,8 +55,8 @@ weights_dtype = "int8"
 use_quantized_matmul = false
 
 [component_lr]
-adaln = 2e-5
-base = 2e-5
+adaln = 2e-6
+base = 2e-6
 
 [dataset.caption]
 caption_mode = "mixed"

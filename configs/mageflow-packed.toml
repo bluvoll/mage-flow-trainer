@@ -24,4 +24,4 @@ quantize_text_encoder = true
 skip_policy = "all_adaln"
 
 [optimizer]
-lr = 1e-4
+lr = 2e-5

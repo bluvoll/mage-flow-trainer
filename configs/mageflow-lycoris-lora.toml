@@ -30,7 +30,7 @@ skip_policy = "all_adaln"
 
 [optimizer]
 kind = "adamw"
-lr = 1e-4
+lr = 2e-5
 
 [flow]
 shift = 6.0
