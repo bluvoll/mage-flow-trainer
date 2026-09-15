@@ -142,7 +142,14 @@ def build_scheduler(
     `total_steps` is expected to already be scaled by world size -- Accelerate's wrapper advances
     the inner scheduler once per process per `step()`. See `Trainer._build_optimizer`.
     """
-    warmup = max(0, cfg.warmup_steps)
+    raw_warmup = float(cfg.warmup_steps)
+    if raw_warmup < 0:
+        raise ValueError(f"schedule.warmup_steps must be >= 0, got {cfg.warmup_steps}")
+    if 0.0 < raw_warmup < 1.0:
+        warmup = int(math.ceil(total_steps * raw_warmup))
+    else:
+        warmup = int(raw_warmup)
+    warmup = min(warmup, max(0, total_steps))
     decay_steps = max(1, total_steps - warmup)
     floor = cfg.min_lr_ratio
 
