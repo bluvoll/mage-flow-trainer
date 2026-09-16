@@ -27,7 +27,8 @@ class CheckpointMetadataTests(unittest.TestCase):
                 cfg.train.run_name = 'name-does-not-identify-optimizer'
                 cfg.train.batch_size = 16
                 cfg.dataset.path = '/example/dataset'
-                cfg.optimizer = OptimizerConfig(kind='adafactor', norm_mode='rms_clip', lr=1e-4)
+                cfg.optimizer = OptimizerConfig(kind='adafactor', norm_mode='rms_clip', lr=1e-4,
+                                                use_first_moment=True)
                 cfg.train.cache_text_embeddings = True
                 model = tiny()
                 if cfg.is_lora:
@@ -49,6 +50,7 @@ class CheckpointMetadataTests(unittest.TestCase):
                 config = metadata['training_config']
                 self.assertEqual(config['optimizer']['kind'], 'adafactor')
                 self.assertEqual(config['optimizer']['norm_mode'], 'rms_clip')
+                self.assertTrue(config['optimizer']['use_first_moment'])
                 self.assertEqual(config['optimizer']['lr'], 1e-4)
                 self.assertEqual(config['optimizer']['betas'], [-0.8, 0.999])
                 self.assertEqual(config['adapter']['kind'], kind)
@@ -61,6 +63,7 @@ class CheckpointMetadataTests(unittest.TestCase):
                 group = state['optimizer_groups'][0]
                 self.assertEqual(group['settings']['lr'], 7e-5)
                 self.assertEqual(group['settings']['norm_mode'], 'relative')
+                self.assertTrue(group['settings']['use_first_moment'])
                 self.assertEqual(group['parameter_count'], 4)
                 self.assertNotIn('params', group['settings'])
                 self.assertIn('torch', metadata['training_versions'])

@@ -480,6 +480,12 @@ SPEC: dict[str, Spec] = {
         "with an explicitly tuned learning rate. Separate from gradient clipping.",
         lambda: F.ChoiceEditor(["Upstream default", "relative", "rms_clip", "rms", "clip", "none"],
                                [None, "relative", "rms_clip", "rms", "clip", "none"])),
+    "optimizer.use_first_moment": _spec(
+        "Adafactor first moment",
+        "SDNQ Adafactor: smooth normalized updates using the second beta (default 0.999). "
+        "Adds a full-size momentum buffer; Quantize optimizer state quantizes eligible buffers. "
+        "Off preserves existing behavior. This is separate from Optimi SGD momentum.",
+        lambda: F.BoolEditor("Adafactor first moment"), inline_label=True),
     "optimizer.max_grad_norm": _spec(
         "Gradient clipping", "0 disables. Clipping runs only on sync steps, under Accelerate.",
         lambda: F.FloatEditor(0.0, 100.0, 0.1, 2)),
@@ -694,7 +700,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
             "optimizer.weight_decay", "optimizer.max_grad_norm", "optimizer.norm_mode",
         ]),
         ("Optimizer State", [
-            "optimizer.quantize_state", "optimizer.offload_state", "optimizer.use_kahan", "optimizer.kahan_sum", "optimizer.gradient_release",
+            "optimizer.quantize_state", "optimizer.offload_state", "optimizer.use_kahan", "optimizer.kahan_sum", "optimizer.gradient_release", "optimizer.use_first_moment",
         ]),
         ("Learning Rate Schedule", [
             "schedule.kind", "schedule.warmup_steps", "schedule.min_lr_ratio",

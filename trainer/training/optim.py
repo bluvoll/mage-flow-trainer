@@ -77,6 +77,7 @@ def build_optimizer(groups: list[dict], cfg: OptimizerConfig) -> torch.optim.Opt
         # it costs a buffer per parameter and SR alone is what every measurement here was taken on.
         use_kahan=cfg.use_kahan,
         **({"norm_mode": cfg.norm_mode} if cfg.norm_mode is not None else {}),
+        **({"use_first_moment": cfg.use_first_moment} if kind == "adafactor" else {}),
     )
     # Older SDNQ releases read this stale name only when initializing a quantized
     # Kahan buffer. Supply the alias during step, after constructor validation,
@@ -237,6 +238,11 @@ def estimate_optimizer_bytes(num_trainable: int, cfg: OptimizerConfig) -> int:
 
     if cfg.quantize_state and kind in _SDNQ_KINDS:
         per_param /= 4.0         # uint8 buffers + per-group scales
+    if kind == "adafactor" and cfg.use_first_moment:
+        # A full-size first moment in addition to factored variances. Quantized
+        # buffers need scales/offsets too; unquantized uses the parameter dtype
+        # (conservatively budget FP32 here, since this helper has no dtype input).
+        per_param += 1.125 if cfg.quantize_state else 4.0
     if cfg.use_kahan and kind in _SDNQ_KINDS:
         # `zeros_like(param)` -- the residual buffer follows the parameter dtype (bf16 = 2 bytes),
         # not fp32, unless quantized buffers are on (`optim/optimizer.py:102-104`).

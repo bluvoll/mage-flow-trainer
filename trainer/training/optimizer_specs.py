@@ -37,7 +37,7 @@ def optimizer_defaults(kind):
     return dict(betas=spec.betas, eps=spec.eps, weight_decay=spec.weight_decay,
                 use_kahan=False, kahan_sum=(False if kind == "optimi_adan" else "auto") if spec.family == "Optimi" else None,
                 quantize_state=False, offload_state=False, momentum=0.0, gradient_release=False,
-                norm_mode=None)
+                norm_mode=None, use_first_moment=False)
 
 
 def supports(kind, option):
@@ -48,6 +48,8 @@ def supports(kind, option):
         return bool(spec.betas)
     if option == "norm_mode":
         return kind in ("adafactor", "came")
+    if option == "use_first_moment":
+        return kind == "adafactor"
     if option == "eps":
         return spec.eps is not None
     if option in ("use_kahan", "quantize_state", "offload_state"):

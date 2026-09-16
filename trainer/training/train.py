@@ -965,6 +965,10 @@ class Trainer:
         if cfg.optimizer.kind in ("adafactor", "came"):
             norm_mode = self.optimizer.param_groups[0]["norm_mode"]
             print(f"optim    update normalization={norm_mode}")
+            if cfg.optimizer.kind == "adafactor":
+                group = self.optimizer.param_groups[0]
+                print(f"optim    first moment={'ON' if group['use_first_moment'] else 'OFF'} "
+                      f"(second beta={group['betas'][1]})")
             if cfg.optimizer.kind == "adafactor" and cfg.adapter.kind != "none" and norm_mode == "relative":
                 print("note: Adafactor relative normalization can nearly stall zero-initialized LoRA "
                       "projections at small learning rates. Consider optimizer.norm_mode='rms_clip' "

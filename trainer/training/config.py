@@ -43,6 +43,7 @@ class OptimizerConfig:
     use_kahan: bool = False
     # SDNQ Adafactor/CAME update normalization; None preserves upstream defaults.
     norm_mode: str | None = None
+    use_first_moment: bool = False  # SDNQ Adafactor; smoothing uses betas[1].
 
     # Optimi's name is deliberately separate from SDNQ's use_kahan.
     kahan_sum: bool | str | None = None
@@ -58,6 +59,10 @@ class OptimizerConfig:
         if self.kind not in OPTIMIZERS:
             raise ValueError(f"unknown optimizer: {self.kind!r}")
         spec = OPTIMIZERS[self.kind]
+        if type(self.use_first_moment) is not bool:
+            raise ValueError("optimizer.use_first_moment must be true or false")
+        if self.use_first_moment and self.kind != "adafactor":
+            raise ValueError("optimizer.use_first_moment is only supported by SDNQ Adafactor")
         if self.norm_mode is not None:
             if self.kind not in ("adafactor", "came"):
                 raise ValueError("optimizer.norm_mode is only supported by SDNQ Adafactor/CAME")

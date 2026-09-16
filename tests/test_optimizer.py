@@ -43,6 +43,71 @@ class QuantizedKahanTests(unittest.TestCase):
 
 
 class OptimizerFamilyTests(unittest.TestCase):
+    def test_adafactor_first_moment_updates_and_resume(self):
+        from trainer.training.optim import estimate_optimizer_bytes
+        from trainer.modeling.checkpoint_metadata import optimizer_snapshot
+        cfg = OptimizerConfig(kind='adafactor', lr=1e-4, weight_decay=0,
+                              norm_mode='rms_clip', use_first_moment=True)
+        p = torch.nn.Parameter(torch.zeros(16, 16))
+        opt = build_optimizer([{'params': [p]}], cfg)
+        opt.param_groups[0]['use_torch_compile'] = False
+        p.grad = torch.ones_like(p)
+        opt.step()
+        # SDNQ smooths the normalized update with beta2; no bias correction.
+        torch.testing.assert_close(opt.state[p]['exp_avg'], torch.full_like(p, 0.001))
+        torch.testing.assert_close(p, torch.full_like(p, -1e-7), atol=1e-10, rtol=1e-5)
+        saved = copy.deepcopy(opt.state_dict())
+        q = torch.nn.Parameter(p.detach().clone())
+        resumed = build_optimizer([{'params': [q]}], cfg)
+        resumed.load_state_dict(saved)
+        for param, optimizer in ((p, opt), (q, resumed)):
+            param.grad = torch.full_like(param, 0.5)
+            optimizer.step()
+        torch.testing.assert_close(p, q, rtol=0, atol=0)
+        self.assertTrue(optimizer_snapshot(opt)['optimizer_groups'][0]['settings']['use_first_moment'])
+        off = OptimizerConfig(kind='adafactor', norm_mode='rms_clip')
+        r = torch.nn.Parameter(torch.zeros(16, 16))
+        baseline = build_optimizer([{'params': [r]}], off)
+        baseline.param_groups[0]['use_torch_compile'] = False
+        r.grad = torch.ones_like(r)
+        baseline.step()
+        self.assertNotIn('exp_avg', baseline.state[r])
+        self.assertGreater(estimate_optimizer_bytes(100000, cfg), estimate_optimizer_bytes(100000, off))
+        for kind in ('adamw8bit', 'came', 'optimi_adamw'):
+            with self.assertRaisesRegex(ValueError, 'use_first_moment'):
+                OptimizerConfig(kind=kind, use_first_moment=True)
+        with self.assertRaisesRegex(ValueError, 'use_first_moment'):
+            OptimizerConfig(kind='adafactor', use_first_moment='true')
+
+    @unittest.skipUnless(os.environ.get('MAGEFLOW_GPU_TESTS') == '1', 'GPU opt-in')
+    def test_adafactor_quantized_first_moment(self):
+        from sdnq.training import SDNQTensor
+        from trainer.training.quant import QuantConfig, quantize_module
+        for mode in ('relative', 'rms_clip'):
+            with self.subTest(mode=mode):
+                model = torch.nn.Sequential(torch.nn.Linear(128, 256, bias=False)).to('cuda', torch.bfloat16)
+                model = quantize_module(model, QuantConfig(mode='training', use_quantized_matmul=False),
+                                        torch.device('cuda'), torch.bfloat16, False)
+                p = model[0].weight
+                self.assertIsInstance(p, SDNQTensor)
+                cfg = OptimizerConfig(kind='adafactor', lr=1e-4, norm_mode=mode,
+                                      use_first_moment=True, quantize_state=True)
+                opt = build_optimizer([{'params': list(model.parameters())}], cfg)
+                for _ in range(3):
+                    model(torch.randn(8, 128, device='cuda', dtype=torch.bfloat16)).float().square().mean().backward()
+                    opt.step()
+                    opt.zero_grad(set_to_none=True)
+                torch.cuda.synchronize()
+                self.assertIsInstance(opt.state[p]['exp_avg'], SDNQTensor)
+                self.assertEqual(opt.state[p]['row_var'].dtype, torch.float32)
+                self.assertTrue(torch.isfinite(p.dequantize()).all())
+                self.assertGreater(opt.state[p]['exp_avg'].dequantize().float().abs().sum().item(), 0)
+                saved = copy.deepcopy(opt.state_dict())
+                opt.load_state_dict(saved)
+                model(torch.randn(8, 128, device='cuda', dtype=torch.bfloat16)).float().square().mean().backward()
+                opt.step()
+                self.assertEqual(opt.state[p]['step'], 4)
+
     def test_adafactor_zero_initialized_lora_updates(self):
         # LoRA up projections start at zero. SDNQ's relative normalization
         # limits their update norm to lr * 1e-3, regardless of matrix size.
@@ -129,10 +194,15 @@ class OptimizerFamilyTests(unittest.TestCase):
         self.assertEqual(gui.editors['optimizer.betas'].get(), [-0.8, 0.999])
         self.assertFalse(gui.editors['optimizer.eps'].widget.isEnabled())
         self.assertTrue(gui.editors['optimizer.norm_mode'].widget.isEnabled())
+        self.assertTrue(gui.editors['optimizer.use_first_moment'].widget.isEnabled())
+        gui.editors['optimizer.use_first_moment'].set(True)
         gui.editors['optimizer.norm_mode'].set('rms_clip')
         import toml
         self.assertEqual(toml.loads(bridge.dump_toml(gui.collect()))['optimizer']['norm_mode'], 'rms_clip')
+        self.assertTrue(toml.loads(bridge.dump_toml(gui.collect()))['optimizer']['use_first_moment'])
         choose('came')
+        self.assertFalse(gui.editors['optimizer.use_first_moment'].widget.isEnabled())
+        self.assertFalse(gui.editors['optimizer.use_first_moment'].get())
         self.assertIsNone(gui.editors['optimizer.norm_mode'].get())
         self.assertEqual(len(gui.editors['optimizer.betas'].get()), 3)
         gui.editors['optimizer.quantize_state'].set(True)
@@ -178,6 +248,9 @@ class OptimizerFamilyTests(unittest.TestCase):
                     'optimizer.norm_mode': 'rms_clip', 'dataset.path': '/images'}
             bridge.write_toml(path, flat)
             self.assertEqual(load_config(path).optimizer.norm_mode, 'rms_clip')
+            flat['optimizer.use_first_moment'] = True
+            bridge.write_toml(path, flat)
+            self.assertTrue(load_config(path).optimizer.use_first_moment)
             flat['adapter.kind'] = 'lycoris_lora'
             self.assertFalse(any('nearly stall' in msg for _, msg in bridge.advisories(flat)))
             flat['optimizer.norm_mode'] = None

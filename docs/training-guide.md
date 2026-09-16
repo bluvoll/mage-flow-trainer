@@ -135,6 +135,18 @@ second-moment decay exponent. SDNQ CAME uses `[0.9, 0.999, 0.9999]`, and Optimi 
 uses `[0.98, 0.92, 0.99]`. Explicit AdamW-style positive decay exponents for Adafactor
 are rejected before model loading.
 
+SDNQ Adafactor exposes `optimizer.use_first_moment=true` through the GUI's
+**Adafactor first moment** toggle. It defaults to false. When enabled, SDNQ
+smooths normalized updates using the second beta (`0.999` by default), while
+retaining factored second-moment estimates. This adds a full-size momentum
+buffer; `quantize_state=true` quantizes eligible buffers, but the factored
+variance buffers remain FP32. Startup logs and checkpoint metadata record the
+actual setting. Switching optimizer families resets the toggle to off.
+At beta `0.999`, smoothing starts slowly and is not bias-corrected in SDNQ
+0.2.4, so account for that when interpreting short comparisons. Start tests
+from the original weights with fresh optimizer state; keep normalization and
+LR matched to the corresponding momentum-off baseline.
+
 SDNQ Adafactor also defaults to `norm_mode="relative"`, which scales each
 update by the parameter tensor's norm. Zero-initialized LoRA up projections
 can consequently learn extremely slowly at AdamW-style learning rates such
