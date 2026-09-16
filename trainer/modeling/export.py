@@ -7,9 +7,12 @@ import torch
 from safetensors.torch import save_file
 
 
-def export_checkpoint(model, dest, stem, cfg, dtype, step):
+def export_checkpoint(model, dest, stem, cfg, dtype, step, *, runtime=None):
     dest = Path(dest)
     metadata = {"step": str(step), "run": cfg.train.run_name, "model": "mage_flow"}
+    from .checkpoint_metadata import training_metadata
+
+    metadata.update(training_metadata(cfg, step, dtype, runtime))
     if model.params.modulation_rank:
         metadata.update(
             architecture="mageflow-lowrank-modulation-v1",

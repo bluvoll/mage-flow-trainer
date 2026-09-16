@@ -135,6 +135,27 @@ second-moment decay exponent. SDNQ CAME uses `[0.9, 0.999, 0.9999]`, and Optimi 
 uses `[0.98, 0.92, 0.99]`. Explicit AdamW-style positive decay exponents for Adafactor
 are rejected before model loading.
 
+SDNQ Adafactor also defaults to `norm_mode="relative"`, which scales each
+update by the parameter tensor's norm. Zero-initialized LoRA up projections
+can consequently learn extremely slowly at AdamW-style learning rates such
+as `1e-4`. For LoRA, explicitly set `optimizer.norm_mode="rms_clip"` and tune
+the learning rate for that mode. The GUI exposes **SDNQ update normalization**
+for Adafactor and CAME; **Upstream default** preserves existing behavior
+(relative for Adafactor, rms_clip for CAME). This setting is separate from
+`max_grad_norm`; disabling gradient clipping does not disable normalization.
+Changing normalization requires restarting training or loading adapter weights
+without old optimizer state, because a resumed optimizer restores its groups.
+
+A controlled WAI LoCon check (30 steps, batch 1, LR `1e-4`, five warmup
+steps, BF16 adapters, frozen INT8 base, compiled varlen, Cached Text Encoder)
+reproduced this: relative normalization left the median up-projection RMS at
+`2.29e-9`; rms_clip reached `3.64e-4`. Identical initial weights, captions,
+batches, and noise seeds produced finite gradients in both runs. On the same
+fixed in-sample noise/timestep probe, loss changed from `0.365681` to
+`0.365714` with relative normalization and to `0.356144` with rms_clip.
+This validates meaningful updates and short-run learning, not final image
+quality or the optimal learning rate for a longer run.
+
 Optimi currently supports ordinary trainable tensors: use `quant.mode = "none"`
 for full finetuning. Adapters can use a frozen SDNQ INT8 base with
 `quant.mode = "frozen"`. SDNQ quantized full-finetune tensors are rejected with
@@ -196,6 +217,28 @@ drift. It never exports a model.
 ## Save and resume
 
 Adapter exports contain native `diffusion_model.*` keys, per-module alpha tensors, embedded adapter config, and a JSON sidecar. Base-weight exports contain native transformer keys; SDNQ master weights are dequantized for ordinary safetensors serialization. `save_native=false` writes `transformer/config.json` plus `transformer/diffusion_pytorch_model.safetensors` under the checkpoint directory; use the original frozen VAE/text encoder with these weights.
+
+New full-model and adapter exports embed readable JSON in the safetensors header:
+`training_config` contains the resolved configuration, including optimizer, LR,
+normalization, scheduler, quantization, adapter, captions, and dataset/model paths.
+`training_state` records the step, export dtype, actual optimizer implementation
+and parameter-group settings at save time (including current LR and normalization),
+GPU count, nominal effective batch size, and save tag. The live optimizer settings
+are authoritative when resumed state differs from the requested configuration.
+`training_versions` records installed library versions. These fields travel with
+the checkpoint when it is renamed; optimizer tensors are not embedded.
+
+Read the header without loading model weights:
+
+```bash
+python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors
+python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors --section config
+python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors --section state
+```
+
+Older checkpoints remain readable but do not gain missing training settings.
+Restart the trainer for new saves to include this metadata; an already-running
+process keeps its loaded export code.
 
 Enable `train.save_optimizer_state=true` to save resumable Accelerate state. Resume skips already-consumed microbatches within the current epoch. `train.resume_from` accepts the exported safetensors path or its adjacent `-state` directory. Inference exports alone cannot resume optimizer state. Keep the dataset and batching configuration consistent when resuming.
 

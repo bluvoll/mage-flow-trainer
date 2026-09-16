@@ -329,6 +329,13 @@ def advisories(flat: dict, num_processes: int = 1) -> list[tuple[str, str]]:
     tex = _texture_phases(flat)
     n = max(1, int(num_processes))
 
+    if (flat.get("optimizer.kind") == "adafactor"
+            and flat.get("optimizer.norm_mode") in (None, "relative")
+            and flat.get("adapter.kind", "none") != "none"):
+        out.append(("warn", "SDNQ Adafactor relative normalization can nearly stall zero-initialized "
+                    "LoRA projections at small learning rates. Select rms_clip and tune the learning rate; "
+                    "gradient clipping is a separate setting."))
+
     if n > 1 and flat.get("optimizer.gradient_release"):
         out.append(("error", "Optimi gradient release requires one GPU; DDP updates can precede gradient synchronization."))
     if n > 1:

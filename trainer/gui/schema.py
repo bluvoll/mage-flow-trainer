@@ -473,6 +473,13 @@ SPEC: dict[str, Spec] = {
     "optimizer.eps": _spec("Epsilon", "Denominator floor.", lambda: F.SciEditor("1e-8")),
     "optimizer.weight_decay": _spec(
         "Weight decay", "Decoupled (AdamW).", lambda: F.FloatEditor(0.0, 1.0, 0.005, 4)),
+    "optimizer.norm_mode": _spec(
+        "SDNQ update normalization",
+        "Adafactor defaults to relative; CAME defaults to rms_clip. Relative normalization "
+        "can make zero-initialized LoRA updates extremely small. Use rms_clip for LoRA "
+        "with an explicitly tuned learning rate. Separate from gradient clipping.",
+        lambda: F.ChoiceEditor(["Upstream default", "relative", "rms_clip", "rms", "clip", "none"],
+                               [None, "relative", "rms_clip", "rms", "clip", "none"])),
     "optimizer.max_grad_norm": _spec(
         "Gradient clipping", "0 disables. Clipping runs only on sync steps, under Accelerate.",
         lambda: F.FloatEditor(0.0, 100.0, 0.1, 2)),
@@ -684,7 +691,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
     ("Optimizer", [
         ("Optimizer", [
             "optimizer.kind", "optimizer.lr", "optimizer.betas", "optimizer.eps", "optimizer.momentum",
-            "optimizer.weight_decay", "optimizer.max_grad_norm",
+            "optimizer.weight_decay", "optimizer.max_grad_norm", "optimizer.norm_mode",
         ]),
         ("Optimizer State", [
             "optimizer.quantize_state", "optimizer.offload_state", "optimizer.use_kahan", "optimizer.kahan_sum", "optimizer.gradient_release",

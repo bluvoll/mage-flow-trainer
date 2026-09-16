@@ -101,7 +101,7 @@ _RULES = {
 
     **{f"optimizer.{option}": (lambda c, option=option: supports(c.get("optimizer.kind"), option))
        for option in ("betas", "eps", "use_kahan", "kahan_sum", "momentum",
-                      "quantize_state", "offload_state", "gradient_release")},
+                      "quantize_state", "offload_state", "gradient_release", "norm_mode")},
 
     "schedule.min_lr_ratio": lambda c: c.get("schedule.kind") != "constant",
     "schedule.d": lambda c: c.get("schedule.kind") == "rex",

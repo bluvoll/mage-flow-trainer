@@ -76,6 +76,7 @@ def build_optimizer(groups: list[dict], cfg: OptimizerConfig) -> torch.optim.Opt
         # makes the *realised* one zero by carrying the remainder forward. Off by default because
         # it costs a buffer per parameter and SR alone is what every measurement here was taken on.
         use_kahan=cfg.use_kahan,
+        **({"norm_mode": cfg.norm_mode} if cfg.norm_mode is not None else {}),
     )
     # Older SDNQ releases read this stale name only when initializing a quantized
     # Kahan buffer. Supply the alias during step, after constructor validation,

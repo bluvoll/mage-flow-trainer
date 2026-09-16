@@ -41,6 +41,8 @@ class OptimizerConfig:
     # stochastic rounding -- sdnq applies both (`optim/utils.py:57`), SR on the cast and Kahan on
     # what the cast lost. Costs one extra buffer per trainable parameter.
     use_kahan: bool = False
+    # SDNQ Adafactor/CAME update normalization; None preserves upstream defaults.
+    norm_mode: str | None = None
 
     # Optimi's name is deliberately separate from SDNQ's use_kahan.
     kahan_sum: bool | str | None = None
@@ -56,6 +58,11 @@ class OptimizerConfig:
         if self.kind not in OPTIMIZERS:
             raise ValueError(f"unknown optimizer: {self.kind!r}")
         spec = OPTIMIZERS[self.kind]
+        if self.norm_mode is not None:
+            if self.kind not in ("adafactor", "came"):
+                raise ValueError("optimizer.norm_mode is only supported by SDNQ Adafactor/CAME")
+            if self.norm_mode not in ("relative", "rms_clip", "rms", "clip", "none"):
+                raise ValueError(f"unknown optimizer.norm_mode: {self.norm_mode!r}")
         self.betas = spec.betas if self.betas is None else tuple(self.betas)
         self.eps = spec.eps if self.eps is None else self.eps
         self.weight_decay = spec.weight_decay if self.weight_decay is None else self.weight_decay

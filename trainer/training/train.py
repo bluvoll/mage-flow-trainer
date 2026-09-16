@@ -962,6 +962,13 @@ class Trainer:
                     continue
             print(describe_feasibility(sizes, cfg.dataset.texture))
         est = estimate_optimizer_bytes(trainable, cfg.optimizer) / 1e9
+        if cfg.optimizer.kind in ("adafactor", "came"):
+            norm_mode = self.optimizer.param_groups[0]["norm_mode"]
+            print(f"optim    update normalization={norm_mode}")
+            if cfg.optimizer.kind == "adafactor" and cfg.adapter.kind != "none" and norm_mode == "relative":
+                print("note: Adafactor relative normalization can nearly stall zero-initialized LoRA "
+                      "projections at small learning rates. Consider optimizer.norm_mode='rms_clip' "
+                      "and tune the learning rate; max_grad_norm is separate.")
         print(f"optim    {cfg.optimizer.kind}, state ~{est:.1f}GB "
               f"(quantized={cfg.optimizer.quantize_state}, offload={cfg.optimizer.offload_state})\n",
               flush=True)
@@ -1011,7 +1018,17 @@ class Trainer:
         # at startup. `convert.strip_wrappers` catches it too; this stops it happening at all.
         transformer = self._unwrap(self.transformer)
         from ..modeling.export import export_checkpoint
-        n = export_checkpoint(transformer, dest, stem, cfg, self.dtype, self.global_step)
+        from ..modeling.checkpoint_metadata import optimizer_snapshot
+
+        runtime = optimizer_snapshot(self.optimizer)
+        runtime.update(
+            save_tag=tag,
+            world_size=acc.num_processes,
+            effective_batch_size=(cfg.train.batch_size * cfg.train.gradient_accumulation_steps
+                                  * acc.num_processes),
+        )
+        n = export_checkpoint(transformer, dest, stem, cfg, self.dtype, self.global_step,
+                              runtime=runtime)
 
         written = dest / f"{stem}.safetensors" if single_file else dest
         # `state.json` lives beside the optimizer state, which is the only thing that reads it.

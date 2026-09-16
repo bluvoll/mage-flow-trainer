@@ -43,6 +43,27 @@ class QuantizedKahanTests(unittest.TestCase):
 
 
 class OptimizerFamilyTests(unittest.TestCase):
+    def test_adafactor_zero_initialized_lora_updates(self):
+        # LoRA up projections start at zero. SDNQ's relative normalization
+        # limits their update norm to lr * 1e-3, regardless of matrix size.
+        updates = {}
+        for mode in (None, 'rms_clip'):
+            cfg = OptimizerConfig(kind='adafactor', lr=1e-4, weight_decay=0,
+                                  norm_mode=mode)
+            p = torch.nn.Parameter(torch.zeros(128, 32))
+            opt = build_optimizer([{'params': [p]}], cfg)
+            opt.param_groups[0]['use_torch_compile'] = False
+            p.grad = torch.ones_like(p)
+            opt.step()
+            updates[mode] = p.detach().clone()
+        torch.testing.assert_close(updates['rms_clip'], torch.full((128, 32), -1e-4))
+        self.assertGreater(updates['rms_clip'].norm().item(),
+                           1000 * updates[None].norm().item())
+        for kind, mode in [('adamw8bit', 'relative'), ('optimi_adamw', 'rms_clip'),
+                           ('adafactor', 'invalid')]:
+            with self.assertRaisesRegex(ValueError, 'norm_mode'):
+                OptimizerConfig(kind=kind, norm_mode=mode)
+
     def test_upstream_defaults_and_steps(self):
         import optimi
         from trainer.training.optimizer_specs import OPTIMIZERS
@@ -107,10 +128,16 @@ class OptimizerFamilyTests(unittest.TestCase):
         choose('adafactor')
         self.assertEqual(gui.editors['optimizer.betas'].get(), [-0.8, 0.999])
         self.assertFalse(gui.editors['optimizer.eps'].widget.isEnabled())
+        self.assertTrue(gui.editors['optimizer.norm_mode'].widget.isEnabled())
+        gui.editors['optimizer.norm_mode'].set('rms_clip')
+        import toml
+        self.assertEqual(toml.loads(bridge.dump_toml(gui.collect()))['optimizer']['norm_mode'], 'rms_clip')
         choose('came')
+        self.assertIsNone(gui.editors['optimizer.norm_mode'].get())
         self.assertEqual(len(gui.editors['optimizer.betas'].get()), 3)
         gui.editors['optimizer.quantize_state'].set(True)
         choose('optimi_adamw')
+        self.assertFalse(gui.editors['optimizer.norm_mode'].widget.isEnabled())
         self.assertEqual(gui.editors['optimizer.eps'].get(), 1e-6)
         self.assertFalse(gui.editors['optimizer.quantize_state'].get())
         self.assertFalse(gui.editors['optimizer.use_kahan'].widget.isEnabled())
@@ -147,3 +174,11 @@ class OptimizerFamilyTests(unittest.TestCase):
             bridge.write_toml(path, flat)
             with self.assertRaisesRegex(ValueError, "Optimi does not yet support"):
                 load_config(path)
+            flat = bridge.defaults('adafactor') | {'optimizer.kind': 'adafactor',
+                    'optimizer.norm_mode': 'rms_clip', 'dataset.path': '/images'}
+            bridge.write_toml(path, flat)
+            self.assertEqual(load_config(path).optimizer.norm_mode, 'rms_clip')
+            flat['adapter.kind'] = 'lycoris_lora'
+            self.assertFalse(any('nearly stall' in msg for _, msg in bridge.advisories(flat)))
+            flat['optimizer.norm_mode'] = None
+            self.assertTrue(any('nearly stall' in msg for _, msg in bridge.advisories(flat)))
