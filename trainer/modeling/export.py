@@ -10,6 +10,12 @@ from safetensors.torch import save_file
 def export_checkpoint(model, dest, stem, cfg, dtype, step):
     dest = Path(dest)
     metadata = {"step": str(step), "run": cfg.train.run_name, "model": "mage_flow"}
+    if model.params.modulation_rank:
+        metadata.update(
+            architecture="mageflow-lowrank-modulation-v1",
+            experimental="true",
+            modulation_rank=str(model.params.modulation_rank),
+        )
     if cfg.is_lora and hasattr(model, "_lycoris_config"):
         from ..training.lycoris import lycoris_state_dict
 
@@ -48,11 +54,19 @@ def export_checkpoint(model, dest, stem, cfg, dtype, step):
         out = dest / f"{stem}.safetensors"
     else:
         state = model.state_dict()
+        from .compressed_modulation import compressed_parameter
+
+        keep_fp32 = {
+            k: v.detach().to("cpu", torch.float32).contiguous()
+            for k, v in state.items()
+            if model.params.modulation_rank and compressed_parameter(k)
+        }
         if cfg.quant.mode == "training":
             from ..training.quant import dequantize_state_dict
 
             state = dequantize_state_dict(state, dtype)
         state = {k: v.detach().to("cpu", dtype).contiguous() for k, v in state.items()}
+        state.update(keep_fp32)
         config = asdict(model.params)
         metadata["model_config"] = json.dumps(config)
         if cfg.train.save_native:

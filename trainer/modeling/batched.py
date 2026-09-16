@@ -71,8 +71,8 @@ def _double_stream_block_forward(
     """
     attn = block.attn
 
-    img_mod1, img_mod2 = block.img_mod(temb).chunk(2, dim=-1)  # each [B, 3*dim]
-    txt_mod1, txt_mod2 = block.txt_mod(temb).chunk(2, dim=-1)
+    img_mod1, img_mod2 = block.img_mod(temb).to(hidden_states.dtype).chunk(2, dim=-1)
+    txt_mod1, txt_mod2 = block.txt_mod(temb).to(encoder_hidden_states.dtype).chunk(2, dim=-1)
 
     if token_sample_ids is not None:
         img_ids, txt_ids = token_sample_ids

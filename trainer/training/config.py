@@ -130,6 +130,7 @@ class TrainConfig:
     max_text_tokens: int = 512
     gradient_checkpointing: bool = True
     dtype: str = "bfloat16"
+    compressed_adaln_dtype: str = "float32"
     seed: int = 42
     num_workers: int = 2
     # Images per VAE forward under `dataset.source = "encode"`. The encode runs under no_grad and
@@ -195,6 +196,8 @@ class TrainConfig:
             raise ValueError("Mage-Flow compile requires regional SDPA and default/max-autotune-no-cudagraphs mode")
         if isinstance(self.batch_size, dict):
             self.batch_size = {int(k): int(v) for k, v in self.batch_size.items()}
+        if self.compressed_adaln_dtype not in ("float32", "bfloat16"):
+            raise ValueError("train.compressed_adaln_dtype must be float32 or bfloat16")
         if self.dtype not in ("bfloat16", "float16", "float32"):
             raise ValueError(f"unknown dtype: {self.dtype}")
         if self.vae_encode_chunk < 1:

@@ -26,6 +26,7 @@ class MageFlowParams:
     axes_dim: list[int]
     checkpoint: bool
     patch_size: int = 1
+    modulation_rank: int = 0  # 0 preserves the original checkpoint architecture.
 
 
 class MageFlow(nn.Module):
@@ -63,6 +64,23 @@ class MageFlow(nn.Module):
                 for _ in range(params.depth)
             ]
         )
+
+        if params.modulation_rank:
+            from .compressed_modulation import ModulationLinear
+
+            if not 0 < params.modulation_rank <= self.inner_dim:
+                raise ValueError("modulation_rank must be in [1, hidden_size]")
+            self.modulation_down = ModulationLinear(self.inner_dim, params.modulation_rank)
+            for block in self.transformer_blocks:
+                for name in ("img_mod", "txt_mod"):
+                    setattr(
+                        block,
+                        name,
+                        nn.Sequential(
+                            nn.Identity(),
+                            ModulationLinear(params.modulation_rank, 6 * self.inner_dim),
+                        ),
+                    )
 
         self.norm_out = AdaLayerNormContinuous(
             self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6
@@ -132,6 +150,11 @@ class MageFlow(nn.Module):
             if isinstance(layer, BaseTunerLayer):
                 layer.enable_adapters(True)
 
+    def block_condition(self, temb):
+        if self.params.modulation_rank:
+            return self.modulation_down(nn.functional.silu(temb).to(self.modulation_down.weight.dtype))
+        return temb
+
     def forward(
         self, hidden_states, timestep, encoder_hidden_states, return_dict=False
     ):
@@ -152,6 +175,7 @@ class MageFlow(nn.Module):
         img = self.img_in(image.flatten(2).transpose(1, 2))
         txt = self.txt_in(self.txt_norm(text))
         temb = self.time_text_embed(timestep.to(img.dtype), img)
+        block_temb = self.block_condition(temb)
         freqs = self.pos_embed([(1, h, w)], device=img.device)
         if self.compiled_blocks:
             freqs = torch.view_as_real(freqs)
@@ -170,7 +194,7 @@ class MageFlow(nn.Module):
                 block,
                 img,
                 txt,
-                temb,
+                block_temb,
                 freqs,
                 mask,
                 self.num_attention_heads,
@@ -220,6 +244,7 @@ class MageFlow(nn.Module):
         img = self.img_in(img)
         txt = self.txt_in(self.txt_norm(txt))
         temb = self.time_text_embed(timestep.to(img.dtype), img)
+        block_temb = self.block_condition(temb)
         img_ids = torch.tensor(
             [i for i, n in enumerate(image_lengths) for _ in range(n)], device=device
         )
@@ -253,7 +278,7 @@ class MageFlow(nn.Module):
                 block,
                 img,
                 txt,
-                temb,
+                block_temb,
                 freqs,
                 None,
                 self.num_attention_heads,

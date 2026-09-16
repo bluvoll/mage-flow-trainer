@@ -1,0 +1,58 @@
+# EXPERIMENTAL: use a downloaded compressed checkpoint or trainer.tools.distill_modulation.
+# This checkpoint requires this trainer's compressed-modulation implementation.
+[dataset]
+path = "/path/to/dataset"
+source = "latents"
+resolution = 1024
+max_bucket_reso = 4096
+
+[train]
+model_path = "mage-flow"
+transformer_path = "output/compressed-mageflow/rank256-fp64-qr.safetensors"
+output_dir = "output"
+run_name = "compressed-r256-finetune"
+dtype = "bfloat16"
+compressed_adaln_dtype = "float32" # Or "bfloat16"; affects only compressed modulation factors.
+batch_size = 1
+gradient_accumulation_steps = 1
+gradient_checkpointing = true
+pack_resolutions = true
+attention_backend = "torch_varlen"
+compile = "default"
+cache_text_embeddings = true
+caption_variations = 5
+caption_cache_path = "/path/to/dataset/caption_variations.sqlite"
+max_steps = 10 # Smoke test; change for a real run.
+save_every_epochs = 0
+save_optimizer_state = false
+
+[adapter]
+kind = "none"
+
+[optimizer]
+kind = "adamw8bit"
+lr = 2e-6
+quantize_state = true
+offload_state = false
+use_kahan = false
+
+[quant]
+mode = "training"
+weights_dtype = "int8"
+skip_policy = "all_adaln"
+use_quantized_matmul = false
+quantize_text_encoder = true
+
+[schedule]
+kind = "rex"
+
+[flow]
+shift = 6.0
+
+[dataset.caption]
+caption_mode = "mixed"
+mixed_weights = { tags = 40, nl = 20, tags_nl = 20, nl_tags = 20 }
+shuffle_tags = true
+tag_dropout_percent = 0.1
+caption_dropout_percent = 0.1
+nl_shuffle_sentences = true

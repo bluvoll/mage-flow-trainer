@@ -15,8 +15,8 @@ ASSETS = Path(__file__).with_name("assets")
 
 
 def model_load_kwargs(train):
-    return {name: getattr(train, name, None) for name in
-            ("transformer_path", "text_encoder_path", "vae_path", "tokenizer_path")}
+    return {name: getattr(train, name, "float32" if name == "compressed_adaln_dtype" else None) for name in
+            ("transformer_path", "text_encoder_path", "vae_path", "tokenizer_path", "compressed_adaln_dtype")}
 
 
 def text_sources(path, text_encoder_path=None, tokenizer_path=None):
@@ -62,6 +62,7 @@ def load_components(
     text_encoder_path=None,
     vae_path=None,
     tokenizer_path=None,
+    compressed_adaln_dtype="float32",
 ):
     path = Path(path)
     transformer = None
@@ -102,6 +103,9 @@ def load_components(
         transformer.pos_embed = MageFlowEmbedRope(
             theta=10000, axes_dim=params.axes_dim, scale_rope=True
         )
+        from .compressed_modulation import set_modulation_dtype
+
+        set_modulation_dtype(transformer, getattr(torch, compressed_adaln_dtype))
         transformer.to(dtype=dtype)
         transformer.configure_execution()
     encoder = tokenizer = vae = None

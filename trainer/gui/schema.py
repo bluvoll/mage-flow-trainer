@@ -94,6 +94,11 @@ SPEC: dict[str, Spec] = {
     "train.dtype": _spec(
         "Precision", "bfloat16 on Ada/Ampere. float32 is for debugging only.",
         lambda: F.ChoiceEditor(["bfloat16", "float16", "float32"])),
+    "train.compressed_adaln_dtype": _spec(
+        "Compressed AdaLN precision",
+        "Only compressed Mage-Flow: precision of the shared projection and per-block heads. "
+        "FP32 is the default; BF16 reduces their weight and gradient memory. Ordinary models are unaffected.",
+        lambda: F.ChoiceEditor(["float32", "bfloat16"])),
     "train.seed": _spec(
         "Seed", "Seeds sampling, caption RNG and the batch order. Each sample folds the seed with "
         "its index and epoch, so DDP ranks draw different captions rather than identical ones.",
@@ -645,7 +650,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
             "train.vae_encode_chunk",
         ]),
         ("Memory / Precision", [
-            "train.dtype", "train.gradient_checkpointing", "train.pack_resolutions", "train.checkpoint_blocks", "train.attention_backend", "train.max_text_tokens", "train.cache_text_embeddings", "train.caption_variations", "train.caption_cache_path", "train.offload_text_encoder",
+            "train.dtype", "train.compressed_adaln_dtype", "train.gradient_checkpointing", "train.pack_resolutions", "train.checkpoint_blocks", "train.attention_backend", "train.max_text_tokens", "train.cache_text_embeddings", "train.caption_variations", "train.caption_cache_path", "train.offload_text_encoder",
         ]),
         ("torch.compile", [
             "train.compile", "train.compile_dynamic", "train.compile_regional",

@@ -16,7 +16,7 @@ _COMPONENT_PATTERNS = [
     ),
     ("image_attn", re.compile(r"^transformer_blocks\.\d+\.attn\.")),
     ("mlp", re.compile(r"^transformer_blocks\.\d+\.(img_mlp|txt_mlp)\.")),
-    ("adaln", re.compile(r"^(norm_out|time_text_embed)\.")),
+    ("adaln", re.compile(r"^(norm_out|time_text_embed|modulation_down)\.")),
     ("base", re.compile(r"^(img_in|txt_in|txt_norm|proj_out)\.")),
 ]
 COMPONENTS = ("image_attn", "text_attn", "mlp", "adaln", "base")

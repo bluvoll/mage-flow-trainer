@@ -131,6 +131,11 @@ def quantize_module(
     from sdnq.training import add_module_skip_keys, apply_sdnq_training_to_module
 
     is_training = cfg.mode == "training"
+    if getattr(getattr(module, "params", None), "modulation_rank", 0):
+        cfg = replace(
+            cfg,
+            extra_skip=cfg.extra_skip + ["modulation_down", "img_mod", "txt_mod"],
+        )
     sdnq_cfg = build_sdnq_config(cfg, device, is_training, use_qmm)
 
     module, sdnq_cfg = add_module_skip_keys(module, sdnq_cfg)
@@ -163,7 +168,7 @@ def dequantize_state_dict(
 
 
 def quantized_layer_report(module: nn.Module) -> tuple[int, int, list[str]]:
-    """-> (quantized Linear count, total Linear count, names left in bf16).
+    """-> (quantized Linear count, total Linear count, unquantized layer names).
 
     Worth printing: a skip list that matches nothing is indistinguishable from a correct one until
     quality drops, and a typo'd key fails silently.
