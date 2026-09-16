@@ -7,12 +7,12 @@ import torch
 
 
 def time_shift(mu: float, sigma: float, t: torch.Tensor) -> torch.Tensor:
-    """Flux-style shift. Ported from diffusion-pipe (models/cosmos_predict2.py:22)."""
+    """Flux-style shift. Ported from diffusion-pipe."""
     return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
 
 
 def get_lin_function(x1: float = 256, y1: float = 0.5, x2: float = 4096, y2: float = 1.15):
-    """Linear interpolation of mu against sequence length (cosmos_predict2.py:26)."""
+    """Linear interpolation of mu against sequence length, from diffusion-pipe."""
     m = (y2 - y1) / (x2 - x1)
     b = y1 - m * x1
     return lambda x: m * x + b
@@ -30,8 +30,8 @@ def apply_static_shift(t: torch.Tensor, shift: float) -> torch.Tensor:
 def apply_flux_shift(t: torch.Tensor, latent_h: int, latent_w: int) -> torch.Tensor:
     """Resolution-dependent shift: larger images get pushed to higher noise.
 
-    mu is interpolated against the *token* count (latent_h//2 * latent_w//2, i.e. after the
-    2x2 patch embed), matching diffusion-pipe (models/trainer.py:1002).
+    mu is interpolated against Mage-Flow's token count: latent_h * latent_w,
+    since its transformer uses one token per latent pixel (patch size 1).
     """
     mu = get_lin_function(y1=0.5, y2=1.15)(latent_h * latent_w)
     return time_shift(mu, 1.0, t)

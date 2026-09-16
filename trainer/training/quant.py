@@ -1,4 +1,4 @@
-"""SDNQ quantization for Mage-Flow. Automatic QMM stays off until benchmarked."""
+"""SDNQ quantization for Mage-Flow. Quantized matmul requires explicit opt-in."""
 
 from __future__ import annotations
 

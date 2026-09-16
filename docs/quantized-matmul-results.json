@@ -1,0 +1,108 @@
+{
+  "bf16-storage-eager": {
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "storage_audit": {
+      "weight_bytes": 0,
+      "scale_bytes": 0,
+      "offset_bytes": 0,
+      "quantized_parameters": 0
+    },
+    "quantized_matmul": false,
+    "forward_audit": {},
+    "model_compile": null,
+    "sample_count": 10,
+    "parameter_dtypes": {
+      "torch.bfloat16": 2756348544,
+      "torch.float32": 114475264
+    },
+    "peak_allocated_gib": 18.225172996520996,
+    "peak_reserved_gib": 19.376953125,
+    "warm_median_seconds": 1.5696566064980289,
+    "mean_loss": 0.3240657119452953,
+    "first10_loss": 0.3406682997941971,
+    "last10_loss": 0.33403040766716,
+    "mean_absolute_loss_deviation_from_bf16_percent": 0.0
+  },
+  "uint8-storage-eager": {
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "storage_audit": {
+      "weight_bytes": 2717908992,
+      "scale_bytes": 10616832,
+      "offset_bytes": 10616832,
+      "quantized_parameters": 2717908992
+    },
+    "quantized_matmul": false,
+    "forward_audit": {
+      "quantized_linear_forward": 144
+    },
+    "model_compile": null,
+    "sample_count": 10,
+    "parameter_dtypes": {
+      "torch.bfloat16": 2756348544,
+      "torch.float32": 114475264
+    },
+    "peak_allocated_gib": 15.96648120880127,
+    "peak_reserved_gib": 16.87890625,
+    "warm_median_seconds": 1.562626464998175,
+    "mean_loss": 0.3286212496459484,
+    "first10_loss": 0.34120323956012727,
+    "last10_loss": 0.3427578926086426,
+    "mean_absolute_loss_deviation_from_bf16_percent": 1.5451544721908028
+  },
+  "int8-eager": {
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "storage_audit": {
+      "weight_bytes": 2717908992,
+      "scale_bytes": 10616832,
+      "offset_bytes": 0,
+      "quantized_parameters": 2717908992
+    },
+    "quantized_matmul": true,
+    "forward_audit": {
+      "quantized_linear_forward_int8_matmul_dynamic": 144
+    },
+    "sample_count": 10,
+    "parameter_dtypes": {
+      "torch.bfloat16": 2756348544,
+      "torch.float32": 114475264
+    },
+    "peak_allocated_gib": 15.992112636566162,
+    "peak_reserved_gib": 16.9453125,
+    "warm_median_seconds": 1.4100309980021848,
+    "mean_loss": 0.38108912646770476,
+    "first10_loss": 0.3494623526930809,
+    "last10_loss": 0.34700750559568405,
+    "mean_absolute_loss_deviation_from_bf16_percent": 13.181315410682,
+    "model_compile": null
+  },
+  "uint8-eager": {
+    "torch": "2.10.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "storage_audit": {
+      "weight_bytes": 2717908992,
+      "scale_bytes": 10616832,
+      "offset_bytes": 10616832,
+      "quantized_parameters": 2717908992
+    },
+    "quantized_matmul": true,
+    "forward_audit": {
+      "quantized_linear_forward_uint8_matmul_dynamic": 144
+    },
+    "model_compile": null,
+    "sample_count": 10,
+    "parameter_dtypes": {
+      "torch.bfloat16": 2756348544,
+      "torch.float32": 114475264
+    },
+    "peak_allocated_gib": 16.106237411499023,
+    "peak_reserved_gib": 17.072265625,
+    "warm_median_seconds": 1.4649209180024627,
+    "mean_loss": 0.3355018238723278,
+    "first10_loss": 0.34328257888555525,
+    "last10_loss": 0.3451531633734703,
+    "mean_absolute_loss_deviation_from_bf16_percent": 3.1284077594757083
+  }
+}

@@ -1,7 +1,5 @@
 # Mage-Flow trainer
 
-> Anima has been purged in favor of Mage-Flow. Use the `trainer` package and regenerate old Anima latent caches.
-
 Train Mage-Flow adapters or finetune the full transformer through the GUI or CLI, with native model weights, native-resolution attention, and frozen Qwen3-VL text conditioning. Adapted from `diffusion-pipe-mageflow-ft` commit `40bf63a`, without requiring that checkout or DeepSpeed at runtime.
 
 ## Why use this trainer?

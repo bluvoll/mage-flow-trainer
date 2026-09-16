@@ -2,7 +2,7 @@
 
 Mage-Flow text-to-image training with native model weights, frozen Qwen3-VL conditioning, Mage-VAE, PEFT LoRA/LoKr, LyCORIS LoCon/LoKr/DoRA, and SDNQ quantized base-weight training. The implementation adapts `diffusion-pipe-mageflow-ft` commit `40bf63a59269b5cfd73508ff25b5da7357cb1db1` without a runtime dependency on that checkout or DeepSpeed.
 
-Anima is removed from the active trainer. The package is now `trainer`; old commands beginning with `anima` no longer apply. Previous local run configs and documentation were preserved in `backups/anima-retired/`. Old latent caches are incompatible and must be regenerated.
+Use the `trainer` package for Mage-Flow training and caching. Image latent caches must be generated with the Mage-Flow VAE.
 
 ## Run
 
@@ -75,7 +75,16 @@ Packed resolution batches use a **fixed image count**, not a token-budget schedu
 - `quant.mode="training"`: SDNQ quantized master weights, stochastic rounding and base-weight updates. Use an SDNQ optimizer such as `adamw8bit`; its state can be quantized and offloaded to host memory.
 - `quant.quantize_text_encoder=true`: quantize Qwen3-VL in **frozen** mode, including during transformer full finetuning.
 - Input/output projections, text input norm and timestep embeddings stay in high precision. `all_adaln` additionally protects both streams' modulation; `first_block_adaln` and `mlp_down` are available alternatives.
-- `use_quantized_matmul="auto"` currently resolves to **off**. Anima's crossover measurements do not establish a Mage-Flow policy. Explicit `true` is available for measurement.
+- `use_quantized_matmul="auto"` currently resolves to **off**. Explicit `true` enables SDNQ quantized matmul; its memory, throughput, and numerical effects depend on the workload.
+
+With SDNQ 0.2.4 and PyTorch 2.10.0, the tested INT8/UINT8 dynamic matmul
+full-finetune paths fail during regional model compilation at SDNQ's
+`ctx.use_hadamard` branch. Omit `train.compile` to exercise those paths;
+SDNQ still compiles its internal kernels. Storage-only quantization continues
+to work with model compilation. The installed SDNQ configuration defaults
+`use_grad_ckpt` to `true`, including for these matmul tests.
+See the [controlled matmul benchmark](quantized-matmul-benchmark.md) for
+measured memory, throughput, and loss differences.
 
 `adapter.dtype` explicitly controls trainable adapter precision: `float32` (default) or `bfloat16`. Frozen base weights keep their configured SDNQ storage. BF16 adapters reduce both gradient storage and LoRA projection activations; validate training quality for that setting.
 

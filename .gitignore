@@ -11,6 +11,7 @@ start-converter.bat
 __pycache__/
 *.pyc
 *.egg-info/
+build/
 
 # Checkpoints, samples and per-run config copies.
 output/

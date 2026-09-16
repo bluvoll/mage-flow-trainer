@@ -577,7 +577,7 @@ SPEC: dict[str, Spec] = {
         lambda: F.ChoiceEditor(["int8", "uint8", "fp8", "int7", "int6", "int5", "int4"])),
     "quant.use_quantized_matmul": _spec(
         "Quantized matmul",
-        'Auto stays off until Mage-Flow measurements establish a useful policy. Explicit on quantizes activations too.',
+        'Auto defaults to off. Explicit on quantizes activations too; compatibility and performance depend on the SDNQ/PyTorch versions.',
         lambda: F.ChoiceEditor(["auto", "on", "off"], ["auto", True, False])),
     "quant.skip_policy": _spec(
         "Skip policy",

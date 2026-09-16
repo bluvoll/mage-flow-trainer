@@ -912,7 +912,7 @@ class Trainer:
             how = "auto" if cfg.quant.use_quantized_matmul == "auto" else "explicit"
             print(f"quant    {cfg.quant.mode}/{cfg.quant.weights_dtype}, {nq}/{ntotal} Linear "
                   f"quantized, skip={cfg.quant.skip_policy}")
-            print(f"         quantized matmul {'ON' if use_qmm else 'OFF'} ({how}; auto remains off until Mage-Flow benchmarks are available)")
+            print(f"         quantized matmul {'ON' if use_qmm else 'OFF'} ({how}; auto defaults to off)")
         f = cfg.flow
         flow_bits = [f.timestep_sample_method]
         if f.timestep_sample_method == "logit_normal":

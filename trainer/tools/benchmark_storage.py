@@ -1,5 +1,6 @@
-"""Controlled SDNQ storage comparison, using fixed per-step randomness and cached text."""
+"""Controlled SDNQ storage/matmul comparison with fixed randomness and cached text."""
 import argparse
+import collections
 import hashlib
 import json
 import statistics
@@ -20,6 +21,12 @@ class StorageTrainer(MemoryTrainer):
         selected = candidates
         references = {n: p[:16].detach().cpu().float().clone() for n, p in selected}
         super()._quantize()
+        self.forward_audit = dict(collections.Counter(
+            getattr(module.forward_func, "__name__", type(module.forward_func).__name__)
+            for module in self.transformer.modules() if hasattr(module, "forward_func")))
+        if self.cfg.quant.use_quantized_matmul is True and not any(
+                "matmul" in name for name in self.forward_audit):
+            raise RuntimeError("Quantized matmul was requested but no matmul forward was selected")
         params = dict(self.transformer.named_parameters())
         errors = []
         for name, reference in references.items():
@@ -65,8 +72,6 @@ def main():
     cfg = load_config(args.config)
     if cfg.train.gradient_accumulation_steps != 1 or cfg.train.log_every != 1:
         raise ValueError('Requires accumulation=1 and log_every=1')
-    if cfg.quant.use_quantized_matmul is not False:
-        raise ValueError('This benchmark is for storage-only quantization')
     trainer = StorageTrainer(cfg, None if args.audit_only else args.config)
     if args.audit_only:
         Path(args.output).write_text(json.dumps(dict(
@@ -77,6 +82,8 @@ def main():
     assert len(rows) == cfg.train.max_steps
     result = dict(config=args.config, torch=torch.__version__, gpu=torch.cuda.get_device_name(),
                   steps=rows, weight_audit=trainer.weight_audit, storage_audit=trainer.storage_audit,
+                  quantized_matmul=cfg.quant.use_quantized_matmul, forward_audit=trainer.forward_audit,
+                  model_compile=cfg.train.compile,
                   sample_count=len(trainer.dataset), parameter_dtypes=trainer.parameter_dtypes,
                   peak_allocated_gib=max(r['peak_allocated_bytes'] for r in rows)/2**30,
                   peak_reserved_gib=max(r['peak_reserved_bytes'] for r in rows)/2**30,
