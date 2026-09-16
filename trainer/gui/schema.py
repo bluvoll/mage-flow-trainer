@@ -33,6 +33,11 @@ def _spec(label, tooltip, make, inline_label=False):
 
 SPEC: dict[str, Spec] = {
 
+    "train.text_cache_batch_size": _spec(
+        "Text cache batch size",
+        "Captions per encoder forward per GPU while building either text cache. Independent of training batch size. "
+        "Increase for throughput when VRAM permits; reduce if caching runs out of memory.",
+        lambda: F.IntEditor(1, 1024)),
     "train.caption_variations": _spec("Caption variations per image", "0 uses fixed-caption RAM caching. A positive count creates persistent augmented caption slots; exact duplicate embeddings share disk storage. Enable text caching.", lambda: F.IntEditor(0, 100000)),
     "train.caption_cache_path": _spec("Caption cache database", "SQLite path. Empty places caption_variations.sqlite in the dataset folder. Reused across runs; stores embeddings on disk, not all in RAM.", lambda: F.PathEditor("file")),
     "train.cache_text_embeddings": _spec("Cache text embeddings", "Unload Qwen3-VL before training. Set caption variations above zero to persist augmented captions and embeddings in SQLite; zero requires fixed captions.", lambda: F.BoolEditor("Cache text embeddings"), inline_label=True),
@@ -650,7 +655,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
             "train.vae_encode_chunk",
         ]),
         ("Memory / Precision", [
-            "train.dtype", "train.compressed_adaln_dtype", "train.gradient_checkpointing", "train.pack_resolutions", "train.checkpoint_blocks", "train.attention_backend", "train.max_text_tokens", "train.cache_text_embeddings", "train.caption_variations", "train.caption_cache_path", "train.offload_text_encoder",
+            "train.dtype", "train.compressed_adaln_dtype", "train.gradient_checkpointing", "train.pack_resolutions", "train.checkpoint_blocks", "train.attention_backend", "train.max_text_tokens", "train.cache_text_embeddings", "train.text_cache_batch_size", "train.caption_variations", "train.caption_cache_path", "train.offload_text_encoder",
         ]),
         ("torch.compile", [
             "train.compile", "train.compile_dynamic", "train.compile_regional",

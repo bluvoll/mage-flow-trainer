@@ -11,6 +11,7 @@ import shutil
 import sys
 import time
 from dataclasses import replace
+from itertools import islice
 from pathlib import Path
 
 # Must precede `import torch`: the caching allocator parses this once, at first CUDA use.
@@ -117,6 +118,12 @@ def require_cuda() -> None:
         "no CUDA device is visible, so this would train on the CPU." + detail +
         "\nSet MAGE_FLOW_ALLOW_CPU=1 to override."
     )
+
+
+def _text_cache_batches(items, size):
+    iterator = iter(items)
+    while batch := list(islice(iterator, size)):
+        yield batch
 
 
 class Trainer:
@@ -456,10 +463,14 @@ class Trainer:
                 self.accelerator.device, self.dtype, False)
         components.text_encoder.to(self.accelerator.device).eval()
         cache = TextEmbeddingCache()
-        for caption in tqdm(captions, desc="Caching text", disable=not self.accelerator.is_main_process):
-            hidden, mask = encode_prompts(components, [caption], self.accelerator.device,
-                                          cfg.train.max_text_tokens)
-            cache.add(caption, hidden, mask)
+        batches = _text_cache_batches(captions, cfg.train.text_cache_batch_size)
+        for batch in tqdm(batches, total=math.ceil(len(captions) / cfg.train.text_cache_batch_size),
+                          desc="Caching text batches", disable=not self.accelerator.is_main_process):
+            hidden, mask = encode_prompts(components, batch, self.accelerator.device,
+                                         cfg.train.max_text_tokens)
+            hidden, mask = hidden.cpu(), mask.cpu()
+            for i, caption in enumerate(batch):
+                cache.add(caption, hidden[i:i + 1], mask[i:i + 1])
         del hidden, mask, components
         gc.collect()
         torch.cuda.empty_cache()
@@ -470,7 +481,7 @@ class Trainer:
         from datetime import timedelta
         from accelerate.utils import InitProcessGroupKwargs
 
-        return InitProcessGroupKwargs(timeout=timedelta(minutes=30))
+        return InitProcessGroupKwargs(timeout=timedelta(hours=1))
 
     def _build_variation_cache(self):
         import gc
@@ -511,14 +522,16 @@ class Trainer:
                         self.accelerator.device, self.dtype, False)
                 components.text_encoder.to(self.accelerator.device).eval()
                 with cache.writer() as db:
-                    for key, caption in tqdm(chain([first], iterator),
-                                             desc=f"Caching captions rank {accelerator.process_index}",
-                                             position=accelerator.process_index):
-                        hidden, mask = encode_prompts(components, [caption], self.accelerator.device,
-                                                     cfg.train.max_text_tokens)
-                        cache.add(key, hidden, mask, db=db)
-                        # Never hold SQLite's writer lock during GPU encoding.
-                        # Each rank commits before its next forward pass.
+                    batches = _text_cache_batches(chain([first], iterator), cfg.train.text_cache_batch_size)
+                    for batch in tqdm(batches,
+                                      desc=f"Caching caption batches rank {accelerator.process_index}",
+                                      position=accelerator.process_index):
+                        hidden, mask = encode_prompts(components, [caption for _, caption in batch],
+                                                     self.accelerator.device, cfg.train.max_text_tokens)
+                        hidden, mask = hidden.cpu(), mask.cpu()
+                        for i, (key, _) in enumerate(batch):
+                            cache.add(key, hidden[i:i + 1], mask[i:i + 1], db=db)
+                        # Commit the batch before the next GPU forward pass.
                         db.commit()
                 db.close()
                 del hidden, mask, components

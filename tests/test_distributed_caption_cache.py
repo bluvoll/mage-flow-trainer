@@ -27,7 +27,7 @@ def worker(rank, world_size, folder, rendezvous):
         trainer = Trainer.__new__(Trainer)
         trainer.cfg = Config(
             train=TrainConfig(cache_text_embeddings=True, caption_variations=5,
-                              caption_cache_path=str(Path(folder) / "cache.sqlite")),
+                              caption_cache_path=str(Path(folder) / "cache.sqlite"), text_cache_batch_size=7),
             dataset=DatasetConfig(path=folder, caption=CaptionConfig(shuffle_tags=True)),
             quant=QuantConfig(mode="none"),
         )
@@ -40,10 +40,14 @@ def worker(rank, world_size, folder, rendezvous):
             device=torch.device("cpu"), wait_for_everyone=dist.barrier, print=lambda *a: None,
         )
         calls = []
+        sizes = []
 
         def encode(components, captions, device, max_length):
             calls.extend(captions)
-            return torch.full((1, 3, 4), float(len(captions[0]))), torch.tensor([[True, True, False]])
+            sizes.append(len(captions))
+            hidden = torch.tensor([len(c) for c in captions], dtype=torch.float32)[:, None, None].expand(-1, 4, 4)
+            lengths = torch.tensor([len(c) % 3 + 1 for c in captions])
+            return hidden, torch.arange(4)[None] < lengths[:, None]
 
         with patch("accelerate.utils.broadcast_object_list", dist.broadcast_object_list), \
              patch("trainer.data.caption_variations.encoder_fingerprint", return_value="test"), \
@@ -58,7 +62,12 @@ def worker(rank, world_size, folder, rendezvous):
             trainer._build_variation_cache()
             assert len(calls) == cold_count
             hidden, mask = trainer.text_cache.get([calls[0]], "cpu", torch.float32)
-            assert hidden.shape == (1, 2, 4) and mask.all()
+            assert hidden.shape == (1, len(calls[0]) % 3 + 1, 4) and mask.all()
+            assert max(sizes) == 7 and all(1 <= n <= 7 for n in sizes)
+            for caption in calls:
+                hidden, mask = trainer.text_cache.get([caption], "cpu", torch.float32)
+                assert hidden.shape[1] == len(caption) % 3 + 1
+                assert (hidden == len(caption)).all() and mask.all()
         (Path(folder) / f"rank{rank}.json").write_text(json.dumps(calls))
         trainer.text_cache.close()
     finally:
@@ -84,8 +93,8 @@ class DistributedCaptionCacheTests(unittest.TestCase):
             self.assertEqual(sum(map(len, shards)), len(stored))
             cache.close()
 
-    def test_process_group_timeout_is_thirty_minutes(self):
-        self.assertEqual(Trainer._process_group_kwargs().timeout, timedelta(minutes=30))
+    def test_process_group_timeout_is_one_hour(self):
+        self.assertEqual(Trainer._process_group_kwargs().timeout, timedelta(hours=1))
 
 
 if __name__ == "__main__":

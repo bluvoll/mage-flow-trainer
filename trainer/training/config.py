@@ -124,6 +124,7 @@ class TrainConfig:
     checkpoint_blocks: list[int] | None = None
     attention_backend: str = "sdpa"
     cache_text_embeddings: bool = False
+    text_cache_batch_size: int = 4
     caption_variations: int = 0
     caption_cache_path: str | None = None
     offload_text_encoder: bool = False
@@ -183,6 +184,8 @@ class TrainConfig:
             self.compile = None
         if self.pack_resolutions and (self.attention_backend == "sdpa" or type(self.batch_size) is not int or self.batch_size < 1):
             raise ValueError("pack_resolutions requires packed attention and a positive integer batch_size")
+        if type(self.text_cache_batch_size) is not int or self.text_cache_batch_size < 1:
+            raise ValueError("train.text_cache_batch_size must be a positive integer")
         if self.max_text_tokens < 1:
             raise ValueError("max_text_tokens must be positive")
         if self.attention_backend not in ("sdpa", "torch_varlen", "flash_attn_2", "flash_attn_3"):

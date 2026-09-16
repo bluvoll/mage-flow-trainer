@@ -6,6 +6,7 @@ Enable **Cache text embeddings** and set **Caption variations per image** above 
 [train]
 cache_text_embeddings = true
 caption_variations = 100
+text_cache_batch_size = 4
 caption_cache_path = "/path/to/storage/captions.sqlite"
 
 [dataset.caption]
@@ -16,6 +17,13 @@ caption_dropout_percent = 0.1
 ```
 
 Use the normal caption controls: tags, NL, tags+NL, NL+tags, weighted mixed mode, protected tags, tag shuffling/dropout, and sentence shuffling. `caption_variations = 0` retains the original fixed-caption RAM cache and requires caption augmentation off. Latent caching is independent; cached latents provide the lowest training memory.
+
+`train.text_cache_batch_size` defaults to **4 captions per GPU** for both SQLite
+and fixed-caption RAM caching. Increase it when the encoder has spare VRAM;
+reduce it to 1 for the lowest caching memory. Captions are padded within each
+batch and stored individually without padding. Changing this setting reuses
+existing cached embeddings; numerical differences from batched GPU execution
+are possible, especially with BF16/quantized encoders. It does not change the training batch size.
 
 ## Slot semantics
 
@@ -33,9 +41,9 @@ Embeddings are unpadded tensors in SQLite BLOBs, including dtype and dimensions.
 
 All DDP ranks participate in encoding missing embeddings, using their selected GPUs. Rank 0 plans the caption slots, then caption hashes assign each pending embedding to exactly one rank. Completed embeddings are reused, even when resuming with a different GPU count. Ranks with no pending work skip loading Qwen3-VL.
 
-A file lock serializes cache-building jobs; ranks within the active job share SQLite through short write transactions. Each embedding commits before the next GPU forward pass, so encoding never holds the database's writer lock. SQLite WAL permits concurrent readers, and committed entries survive interrupted preprocessing. Use a shared local filesystem that supports SQLite WAL and file locking; do not manually delete the WAL/SHM files while a process is using the database.
+A file lock serializes cache-building jobs; ranks within the active job share SQLite through short write transactions. Each batch commits before the next GPU forward pass, so encoding never holds the database's writer lock. SQLite WAL permits concurrent readers, and committed entries survive interrupted preprocessing. Use a shared local filesystem that supports SQLite WAL and file locking; do not manually delete the WAL/SHM files while a process is using the database.
 
-The trainer sets the distributed process-group timeout to **30 minutes**, including cache-planning and completion barriers. This is a limit on an individual collective wait, not on total caching time. Multi-GPU encoding reduces the time other ranks spend waiting, but a stalled rank or a wait longer than 30 minutes can still time out. Each active GPU loads its own encoder, increasing aggregate CPU/GPU memory during preprocessing; the encoders are released before Mage-Flow loads.
+The trainer sets the distributed process-group timeout to **60 minutes**, including cache-planning and completion barriers. This is a limit on an individual collective wait, not on total caching time. Multi-GPU encoding reduces the time other ranks spend waiting, but a stalled rank or a wait longer than 60 minutes can still time out. Each active GPU loads its own encoder, increasing aggregate CPU/GPU memory during preprocessing; the encoders are released before Mage-Flow loads.
 
 Caption pools are keyed by source identity, raw caption contents, augmentation settings, and seed. Embeddings are keyed separately by exact caption and an encoder fingerprint covering model/tokenizer file paths, sizes and modification timestamps, text length, prompt template/prefix, dtype, effective text-encoder quantization settings, and library versions. A changed fingerprint builds a separate embedding namespace. This is a file-metadata fingerprint, not a content hash of every model weight. Old namespaces remain on disk; rebuilding never silently deletes them.
 
@@ -52,3 +60,25 @@ Tests cover duplicate slot frequencies, pool extension, fingerprint separation, 
 The run used shuffle and 10% tag dropout; 10% whole-caption dropout was enabled but happened to produce zero empty-caption visits in those 20 steps. The deterministic dropout edge cases are covered separately by tests. This is a functional/memory smoke run, not a long-run quality test or a 20,000-image scale test.
 
 A second 20-step run reused all entries with two data-loader workers and no encoder load, again reaching 5.395 GiB peak allocated memory. The test database occupied 25.39 MiB. Cold/warm four-step checks selected the same captions; bitwise training-loss identity is not guaranteed by these stochastic/compiled paths. The cache builder preserves the Torch RNG stream around text encoding.
+
+## Text-encoder batching check
+
+A short RTX 4090 test encoded the same 16 synthetic captions, with mixed lengths
+and long repetitive text, using the frozen INT8 SDNQ encoder with BF16 compute.
+These are encoder-only timings after a warmup, including transfer to CPU;
+SQLite writes and model loading are excluded.
+
+| Captions per batch | Captions/second | Peak PyTorch allocated VRAM |
+| --- | ---: | ---: |
+| 1 | 15.48 | 4.70 GiB |
+| 4 | 31.91 | 4.99 GiB |
+| 8 | 29.51 | 5.40 GiB |
+
+Larger batches are not always faster: padding increases work. Batched INT8/BF16
+embeddings were not numerically identical to batch 1 (maximum relative L2
+difference about 18.9%, minimum cosine similarity about 0.982 on this synthetic
+probe). Repeated batch-1 encoding was identical. An unquantized FP32 control
+reduced the batch-1 versus batch-4 maximum relative difference to 0.0059%,
+supporting a numerical-precision explanation rather than a padding/assignment
+error. This is not an image-quality evaluation; use batch size 1 if matching the
+previous single-caption encoding path matters.
