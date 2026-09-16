@@ -28,7 +28,7 @@ SKIP_POLICIES = ("default", "first_block_adaln", "all_adaln", "mlp_down")
 
 @dataclass
 class QuantConfig:
-    """Quantization settings. `mode='none'` leaves the model in bf16."""
+    """Transformer quantization settings; the frozen encoder has its own toggle."""
 
     mode: str = "none"  # "none" | "frozen" | "training"
     weights_dtype: str = (
@@ -36,6 +36,7 @@ class QuantConfig:
     )
     use_quantized_matmul: bool | str = "auto"
     quantize_text_encoder: bool = False
+    text_encoder_weights_dtype: str | None = None  # None inherits weights_dtype
 
     skip_policy: str = "default"
     extra_skip: list[str] = field(default_factory=list)
@@ -71,11 +72,13 @@ class QuantConfig:
 
 def text_encoder_quant_config(cfg: QuantConfig) -> QuantConfig | None:
     """Effective frozen encoder settings, independent of transformer training mode."""
-    if not cfg.quantize_text_encoder or cfg.mode == "none":
+    if not cfg.quantize_text_encoder:
         return None
     return replace(
         cfg,
         mode="frozen",
+        weights_dtype=cfg.text_encoder_weights_dtype or cfg.weights_dtype,
+        text_encoder_weights_dtype=None,
         skip_policy="default",
         extra_skip=["lm_head"],
         use_quantized_matmul=False,

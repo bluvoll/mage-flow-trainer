@@ -19,16 +19,17 @@ from .flow import FlowConfig
 from .params import AdapterConfig, ComponentLRs
 from .preserve import PreserveConfig
 from .quant import QuantConfig
+from .optimizer_specs import OPTIMIZERS
 
 
 @dataclass
 class OptimizerConfig:
-    kind: str = "adamw"                 # "adamw" | "adamw8bit" | "adafactor" | "came" | "lion"
+    kind: str = "adamw"                 # See optimizer_specs. Optimi kinds use optimi_ prefix.
     lr: float = 1e-5
-    # Two for adamw/lion; CAME takes THREE (it keeps a third moment for its instability factor).
-    betas: tuple[float, ...] = (0.9, 0.95)
-    eps: float = 1e-8
-    weight_decay: float = 0.01
+    # Omitted values use the selected optimizer's upstream defaults.
+    betas: tuple[float, ...] | None = None
+    eps: float | None = None
+    weight_decay: float | None = None
     max_grad_norm: float = 1.0
     # sdnq.optim: quantize and/or offload optimizer state. For a 2B full finetune this is not
     # optional -- fp32 AdamW state alone is 16GB.
@@ -41,28 +42,44 @@ class OptimizerConfig:
     # what the cast lost. Costs one extra buffer per trainable parameter.
     use_kahan: bool = False
 
+    # Optimi's name is deliberately separate from SDNQ's use_kahan.
+    kahan_sum: bool | str | None = None
+    momentum: float = 0.0
+    gradient_release: bool = False
+
     def __post_init__(self):
-        self.betas = tuple(self.betas)
-        # CAME keeps a third moment (its instability factor), so it unpacks `betas` into three.
-        # Left unchecked, the default two-tuple sails through config loading and dies inside
-        # sdnq's `came_update` at the first optimizer step -- after model load, dataset scan and
-        # the whole report, with a bare "not enough values to unpack (expected 3, got 2)" that
-        # names neither the config key nor the optimizer.
-        want = 3 if self.kind == "came" else 2
-        if len(self.betas) != want:
-            raise ValueError(
-                f"optimizer.kind = {self.kind!r} takes {want} betas, got {len(self.betas)}: "
-                f"{list(self.betas)}."
-                + ("\nCAME's defaults are betas = [0.9, 0.999, 0.9999]." if want == 3 else "")
-            )
-        # torch's AdamW keeps fp32 master weights and has no residual buffer to offer, so the flag
-        # would be accepted and dropped -- the dead-key failure mode this codebase keeps finding.
-        if self.use_kahan and self.kind.lower() == "adamw":
-            raise ValueError(
-                "optimizer.use_kahan needs an sdnq optimizer (it is sdnq's bf16 master-weight "
-                "residual buffer). Use kind = 'adamw8bit' for the sdnq equivalent, or drop the key "
-                "-- torch's 'adamw' already keeps fp32 masters and has nothing to correct."
-            )
+        self.kind = self.kind.lower()
+        if self.gradient_release and not self.kind.startswith("optimi_"):
+            raise ValueError("optimizer.gradient_release requires an Optimi optimizer")
+        if self.gradient_release and self.max_grad_norm != 0:
+            raise ValueError("optimizer.gradient_release requires optimizer.max_grad_norm=0; global clipping needs persistent gradients")
+        if self.kind not in OPTIMIZERS:
+            raise ValueError(f"unknown optimizer: {self.kind!r}")
+        spec = OPTIMIZERS[self.kind]
+        self.betas = spec.betas if self.betas is None else tuple(self.betas)
+        self.eps = spec.eps if self.eps is None else self.eps
+        self.weight_decay = spec.weight_decay if self.weight_decay is None else self.weight_decay
+        if spec.family == "Optimi" and self.kahan_sum is None:
+            self.kahan_sum = False if self.kind == "optimi_adan" else "auto"
+        if self.kahan_sum is not None and type(self.kahan_sum) is not bool and self.kahan_sum != "auto":
+            raise ValueError("optimizer.kahan_sum must be true, false, or 'auto'")
+        if len(self.betas) != len(spec.betas):
+            raise ValueError(f"optimizer.kind = {self.kind!r} takes {len(spec.betas)} betas; "
+                             f"defaults are {spec.betas}, got {self.betas}")
+        for i, beta in enumerate(self.betas):
+            valid = beta < 0 if self.kind == "adafactor" and i == 0 else 0 <= beta < 1
+            if not valid:
+                raise ValueError(f"optimizer.betas[{i}] is invalid for {self.kind}: {beta}")
+        if self.eps is not None and not self.eps > 0:
+            raise ValueError("optimizer.eps must be positive")
+        if spec.family != "SDNQ" and (self.quantize_state or self.offload_state or self.use_kahan):
+            raise ValueError("optimizer.use_kahan/quantize_state/offload_state need an sdnq optimizer")
+        if spec.family != "Optimi" and self.kahan_sum is not None:
+            raise ValueError("optimizer.kahan_sum is only supported by Optimi")
+        if self.kind != "optimi_sgd" and self.momentum != 0:
+            raise ValueError("optimizer.momentum is only supported by optimi_sgd")
+        if not 0 <= self.momentum < 1:
+            raise ValueError("optimizer.momentum must be in [0, 1)")
 
 
 @dataclass
@@ -379,6 +396,11 @@ def load_config(path: str | Path) -> Config:
                 f"no effect. Add the component to adapter.components "
                 f"(currently {sorted(adapter_components)}), or remove the LR."
             )
+    if cfg.optimizer.gradient_release and cfg.train.gradient_accumulation_steps != 1:
+        raise ValueError("optimizer.gradient_release requires train.gradient_accumulation_steps=1")
+    if cfg.optimizer.kind.startswith("optimi_") and cfg.quant.mode == "training":
+        raise ValueError("Optimi does not yet support SDNQ training tensors. Use quant.mode='none' "
+                         "for full finetuning, or 'frozen' for adapters.")
     if cfg.quant.mode == "frozen" and not cfg.is_lora:
         # A frozen-quantized base has no trainable weights at all, so this would run and produce
         # nothing. Caught here rather than after the model loads.

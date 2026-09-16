@@ -409,8 +409,9 @@ def main() -> int:
     form_targets.extend(sorted((root / "configs").glob("*.toml")))
 
     for path in form_targets:
-        merged = bridge.defaults()
-        merged.update(bridge.flatten(bridge.read_toml(path)))
+        loaded = bridge.flatten(bridge.read_toml(path))
+        merged = bridge.defaults(loaded.get("optimizer.kind", "adamw"))
+        merged.update(loaded)
         gui._apply(merged)
         collected = gui.collect()
         ok, err = bridge.validate(collected)

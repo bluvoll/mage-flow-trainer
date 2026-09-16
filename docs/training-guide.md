@@ -92,6 +92,98 @@ compile_regional = true
 
 Compilation applies to the shared block callable and preserves checkpoint key names. Supported modes are `default` and `max-autotune-no-cudagraphs`, with SDPA or Torch varlen. Metadata construction stays outside compiled/checkpointed blocks. Selective checkpointing trades activation memory against recomputation; smaller sets are not automatically faster overall if they force smaller batches.
 
+## Optimizer families
+
+The GUI groups optimizers into **PyTorch**, **SDNQ**, and **Optimi**. Switching
+optimizers resets betas, epsilon, weight decay, and optimizer-state options to
+that implementation's defaults. Your learning rate and gradient-clipping setting
+are retained. Loading a TOML preserves explicitly configured values; omitted
+betas, epsilon, and weight decay now use optimizer-specific defaults.
+
+Optimi choices are `optimi_adam`, `optimi_adamw`, `optimi_adan`, `optimi_lion`,
+`optimi_radam`, `optimi_ranger`, `optimi_sgd`, and `optimi_stableadamw`.
+For example:
+
+```toml
+[optimizer]
+kind = "optimi_adamw"
+lr = 2e-5
+betas = [0.9, 0.99]
+eps = 1e-6
+kahan_sum = "auto"
+```
+
+Optimi's `kahan_sum` accepts `"auto"`, `true`, or `false`. Auto uses compensation
+for low-precision parameters. Adan defaults to `false`, following upstream.
+SDNQ retains its separate `use_kahan` setting and stochastic rounding. State
+quantization and CPU state offload are SDNQ-only controls. Epsilon is disabled for
+SDNQ, Optimi Lion, and Optimi SGD because these implementations do not accept it;
+legacy SDNQ TOMLs containing epsilon remain readable, but the value has no effect.
+Optimi SGD exposes `momentum` instead of betas.
+
+SDNQ Adafactor defaults to `betas = [-0.8, 0.999]`; its first value is a negative
+second-moment decay exponent. SDNQ CAME uses `[0.9, 0.999, 0.9999]`, and Optimi Adan
+uses `[0.98, 0.92, 0.99]`. Explicit AdamW-style positive decay exponents for Adafactor
+are rejected before model loading.
+
+Optimi currently supports ordinary trainable tensors: use `quant.mode = "none"`
+for full finetuning. Adapters can use a frozen SDNQ INT8 base with
+`quant.mode = "frozen"`. SDNQ quantized full-finetune tensors are rejected with
+Optimi until that combination is validated. The frozen text encoder has an
+independent `quant.quantize_text_encoder` toggle: it can remain INT8 with
+`quant.mode = "none"`, allowing reuse of existing INT8 caption embeddings while
+training the transformer with Optimi. Changing optimizer or transformer-only
+quantization settings does not invalidate that encoder cache. Changing actual
+encoder precision, weights, tokenization, or caption content still can.
+
+For storage-only SDNQ comparisons, `weights_dtype = "uint8"` uses asymmetric
+8-bit storage with an offset; `int8` uses symmetric storage. Set
+`text_encoder_weights_dtype = "int8"` alongside `quantize_text_encoder = true` to
+keep conditioning unchanged while switching transformer storage dtype. If the
+encoder override is omitted, it inherits `weights_dtype`, preserving existing
+config behavior. The GUI exposes both UINT8 and this independent encoder setting.
+
+### Optimi gradient release (single GPU)
+
+Enable **Optimi gradient release** in the GUI, or set:
+
+```toml
+[train]
+gradient_accumulation_steps = 1
+
+[optimizer]
+kind = "optimi_adamw"
+gradient_release = true
+max_grad_norm = 0
+```
+
+This updates each parameter during backward and immediately frees its gradient.
+Ordinary global clipping and gradient accumulation are incompatible and rejected.
+Learning-rate schedules and curriculum LR multipliers still apply; optimizer
+checkpoints preserve per-parameter step counts. Compilation and non-reentrant
+activation checkpointing can remain enabled. Gradient release does not shrink
+weights or optimizer moments, and no total-VRAM reduction is guaranteed.
+
+DDP training with gradient release is blocked before loading the model. In an
+isolated two-4090 BF16/NCCL test, ordinary AdamW kept replicas identical, while
+release mode diverged by a maximum absolute parameter difference of 0.0103 after
+one step and 0.0300 after three. Hooks updated local parameters before DDP gradient
+synchronization. The run completed without an error, so checking only for crashes
+would miss this failure. A compiled single-GPU control with checkpointed BF16
+blocks and a shared FP32 projection matched ordinary AdamW exactly for three steps.
+These are small correctness probes, not full Mage-Flow convergence or VRAM tests.
+
+To reproduce on disposable models (no dataset or model checkpoint is loaded):
+
+```bash
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python -m trainer.tools.probe_gradient_release --device cuda --compile
+CUDA_VISIBLE_DEVICES=0,1 .venv/bin/python -m torch.distributed.run --standalone --nproc_per_node=2 -m trainer.tools.probe_gradient_release --device cuda --ddp
+```
+
+The DDP diagnostic deliberately bypasses the training guard and reports replica
+drift. It never exports a model.
+
+
 ## Save and resume
 
 Adapter exports contain native `diffusion_model.*` keys, per-module alpha tensors, embedded adapter config, and a JSON sidecar. Base-weight exports contain native transformer keys; SDNQ master weights are dequantized for ordinary safetensors serialization. `save_native=false` writes `transformer/config.json` plus `transformer/diffusion_pytorch_model.safetensors` under the checkpoint directory; use the original frozen VAE/text encoder with these weights.

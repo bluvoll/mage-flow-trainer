@@ -23,6 +23,8 @@ from pathlib import Path
 
 import toml
 
+from ..training.optimizer_specs import OPTIMIZERS, optimizer_defaults
+
 from ..data.caption import CaptionConfig
 from ..data.texture import TextureConfig
 from ..data.dataset import DatasetConfig
@@ -92,9 +94,12 @@ def default_of(f: dc.Field):
     return None
 
 
-def defaults() -> dict:
-    return {**{k: default_of(f) for k, f in schema().items()},
-            **{k: list(v) for k, v in ARRAY_KEYS.items()}}
+def defaults(optimizer_kind="adamw") -> dict:
+    result = {**{k: default_of(f) for k, f in schema().items()},
+              **{k: list(v) for k, v in ARRAY_KEYS.items()}}
+    if optimizer_kind in OPTIMIZERS:
+        result.update({f"optimizer.{k}": v for k, v in optimizer_defaults(optimizer_kind).items()})
+    return result
 
 
 # ---------------------------------------------------------------- nested <-> flat
@@ -153,7 +158,7 @@ def prune_defaults(flat: dict) -> dict:
     # someone will misread.
     keep = {"dataset.path", "train.run_name", "train.model_path", "train.output_dir",
             "adapter.kind"}
-    base = defaults()
+    base = defaults(flat.get("optimizer.kind", "adamw"))
     out = {}
     for key, value in flat.items():
         if value is None:
@@ -324,6 +329,8 @@ def advisories(flat: dict, num_processes: int = 1) -> list[tuple[str, str]]:
     tex = _texture_phases(flat)
     n = max(1, int(num_processes))
 
+    if n > 1 and flat.get("optimizer.gradient_release"):
+        out.append(("error", "Optimi gradient release requires one GPU; DDP updates can precede gradient synchronization."))
     if n > 1:
         if tex and not flat.get("train.allow_multi_gpu_texture"):
             out.append(("error",

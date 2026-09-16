@@ -22,6 +22,7 @@ from pathlib import Path
 from PySide6 import QtCore, QtWidgets
 
 from . import bridge
+from ..training.optimizer_specs import OPTIMIZERS, optimizer_defaults, supports
 from .metrics import LiveMetricsWidget
 from .process import (Job, ProcessRunner, audit_launch, cache_launch, concat_launch,
                       train_launch, training_env)
@@ -98,7 +99,9 @@ _RULES = {
     # phase list. `flow.phase_mapping` is inert without any curriculum at all, texture or not.
     "flow.phase_mapping": lambda c: bool(c.get("curriculum")),
 
-    "optimizer.use_kahan": lambda c: c.get("optimizer.kind") != "adamw",
+    **{f"optimizer.{option}": (lambda c, option=option: supports(c.get("optimizer.kind"), option))
+       for option in ("betas", "eps", "use_kahan", "kahan_sum", "momentum",
+                      "quantize_state", "offload_state", "gradient_release")},
 
     "schedule.min_lr_ratio": lambda c: c.get("schedule.kind") != "constant",
     "schedule.d": lambda c: c.get("schedule.kind") == "rex",
@@ -124,13 +127,13 @@ _RULES = {
     "train.compile_dynamic": lambda c: bool(c.get("train.compile")),
     "train.compile_regional": lambda c: bool(c.get("train.compile")),
 
-    "quant.weights_dtype": lambda c: c.get("quant.mode") != "none",
+    "quant.text_encoder_weights_dtype": lambda c: bool(c.get("quant.quantize_text_encoder")),
+    "quant.weights_dtype": lambda c: c.get("quant.mode") != "none" or c.get("quant.quantize_text_encoder"),
     "quant.use_quantized_matmul": lambda c: c.get("quant.mode") != "none",
     "quant.skip_policy": lambda c: c.get("quant.mode") != "none",
     "quant.extra_skip": lambda c: c.get("quant.mode") != "none",
-    "quant.quantize_text_encoder": lambda c: c.get("quant.mode") != "none",
-    "quant.group_size": lambda c: c.get("quant.mode") != "none",
-    "quant.dynamic_loss_threshold": lambda c: c.get("quant.mode") != "none",
+    "quant.group_size": lambda c: c.get("quant.mode") != "none" or c.get("quant.quantize_text_encoder"),
+    "quant.dynamic_loss_threshold": lambda c: c.get("quant.mode") != "none" or c.get("quant.quantize_text_encoder"),
     "quant.use_stochastic_rounding": lambda c: c.get("quant.mode") == "training",
 }
 
@@ -496,7 +499,7 @@ class TrainingGUI(QtWidgets.QWidget):
         except Exception as exc:
             self.log(f"ERROR reading {path}: {exc}")
             return
-        merged = bridge.defaults()
+        merged = bridge.defaults(flat.get("optimizer.kind", "adamw"))
         merged.update(flat)
         if merged.get("adapter.kind") == "lycoris_lora" and "train.compile" not in flat:
             merged["train.compile"] = "default"
@@ -518,6 +521,7 @@ class TrainingGUI(QtWidgets.QWidget):
                 editor.set(flat.get(key))
         finally:
             self._applying = False
+        self._last_optimizer_kind = flat.get("optimizer.kind")
         self._last_adapter_selection = (flat.get("adapter.kind"), flat.get("adapter.lycoris_algo"))
         self._refresh()
 
@@ -618,6 +622,15 @@ class TrainingGUI(QtWidgets.QWidget):
 
     def _on_edit(self):
         if not self._applying:
+            kind = self.editors["optimizer.kind"].get()
+            if kind != getattr(self, "_last_optimizer_kind", kind) and kind in OPTIMIZERS:
+                self._applying = True
+                try:
+                    for key, value in optimizer_defaults(kind).items():
+                        self.editors[f"optimizer.{key}"].set(value)
+                finally:
+                    self._applying = False
+            self._last_optimizer_kind = kind
             selection = (self.editors["adapter.kind"].get(), self.editors["adapter.lycoris_algo"].get())
             if selection != getattr(self, "_last_adapter_selection", None) and selection[0] == "lycoris_lora":
                 self._applying = True

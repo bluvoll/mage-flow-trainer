@@ -107,6 +107,8 @@ class EncoderFingerprintTests(unittest.TestCase):
                 use_quantized_matmul=True,
             )
             self.assertEqual(original, encoder_fingerprint(cfg))
+            cfg.quant = replace(cfg.quant, mode="none")
+            self.assertEqual(original, encoder_fingerprint(cfg))
             cfg.quant = replace(cfg.quant, group_size=64)
             self.assertNotEqual(original, encoder_fingerprint(cfg))
 
@@ -120,7 +122,6 @@ class EncoderFingerprintTests(unittest.TestCase):
             for change in (
                 {"weights_dtype": "fp8"},
                 {"quantize_text_encoder": False},
-                {"mode": "none"},
             ):
                 other = self.config(folder)
                 other.quant = replace(other.quant, **change)
@@ -144,8 +145,10 @@ class EncoderFingerprintTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             cfg = self.config(folder)
+            old_quant = asdict(cfg.quant)
+            old_quant.pop("text_encoder_weights_dtype", None)
             old_key = digest(
-                {**_encoder_fingerprint_payload(cfg), "quant": asdict(cfg.quant)}
+                {**_encoder_fingerprint_payload(cfg), "quant": old_quant}
             )
             path = Path(folder) / "cache.sqlite"
             entry = SimpleNamespace(path=Path(folder) / "a.png", tags="a", nl=None)
@@ -171,3 +174,38 @@ class EncoderFingerprintTests(unittest.TestCase):
             resumed.close()
             cfg.quant = replace(cfg.quant, weights_dtype="fp8")
             self.assertNotEqual(encoder_fingerprint(cfg, path), old_key)
+
+
+def test_loaded_encoder_can_be_quantized_without_transformer(monkeypatch):
+    from types import SimpleNamespace
+    from trainer.training.train import Trainer
+    from trainer.training.quant import QuantConfig
+    calls = []
+    encoder, quantized_encoder = object(), object()
+    def quantize(module, config, *args):
+        calls.append((module, config))
+        return quantized_encoder
+    monkeypatch.setattr('trainer.training.train.quantize_module', quantize)
+    trainer = SimpleNamespace(
+        cfg=SimpleNamespace(quant=QuantConfig(mode='none', quantize_text_encoder=True)),
+        accelerator=SimpleNamespace(device='cpu'), text_encoder=encoder,
+        components=SimpleNamespace(text_encoder=encoder), dtype=None,
+    )
+    Trainer._quantize(trainer)
+    assert trainer.text_encoder is quantized_encoder
+    assert trainer.components.text_encoder is quantized_encoder
+    assert trainer.quant_info is None
+    assert len(calls) == 1 and calls[0][1].mode == 'frozen'
+
+
+def test_encoder_dtype_override_keeps_cache_when_transformer_changes(tmp_path):
+    from dataclasses import replace
+    from trainer.data.caption_variations import encoder_fingerprint
+    from trainer.training.quant import text_encoder_quant_config
+    cfg = EncoderFingerprintTests().config(str(tmp_path))
+    original = encoder_fingerprint(cfg)
+    cfg.quant = replace(cfg.quant, weights_dtype='uint8', text_encoder_weights_dtype='int8')
+    assert encoder_fingerprint(cfg) == original
+    assert text_encoder_quant_config(cfg.quant).weights_dtype == 'int8'
+    cfg.quant = replace(cfg.quant, text_encoder_weights_dtype='uint8')
+    assert encoder_fingerprint(cfg) != original

@@ -27,6 +27,7 @@ dependencies = [
     # SDNQ's quantizer backend only exists on diffusers main, not in 0.39.0.
     "diffusers",
     "sdnq",
+    "torch-optimi==0.3.3",
     "transformers>=4.51",  # >=4.51 for Qwen3
     "accelerate",
     "peft",

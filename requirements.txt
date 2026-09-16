@@ -222,7 +222,10 @@ torch==2.10.0+cu128
     #   mageflow-trainer
     #   peft
     #   sdnq
+    #   torch-optimi
     #   torchvision
+torch-optimi==0.3.3
+    # via mageflow-trainer
 torchvision==0.25.0+cu128
     # via mageflow-trainer
 tqdm==4.70.0

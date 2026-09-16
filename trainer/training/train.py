@@ -221,6 +221,10 @@ class Trainer:
                 f"set train.allow_multi_gpu_texture = true to re-test deliberately against a "
                 f"single-GPU control."
             )
+        if cfg.optimizer.gradient_release and self.accelerator.num_processes != 1:
+            raise ValueError("Optimi gradient release is single-GPU only. DDP can update "
+                             "parameters before gradient synchronization; use the isolated "
+                             "trainer.tools.probe_gradient_release diagnostic to investigate.")
         self._build_data()
         self._build_model()
         self._build_optimizer()
@@ -382,6 +386,11 @@ class Trainer:
         """Quantize before adapters are injected, so LoRA layers wrap quantized bases rather than
         being quantized themselves."""
         qcfg = self.cfg.quant
+        device = self.accelerator.device
+        te_cfg = text_encoder_quant_config(qcfg)
+        if te_cfg is not None and self.text_encoder is not None:
+            self.text_encoder = quantize_module(self.text_encoder, te_cfg, device, self.dtype, False)
+            self.components.text_encoder = self.text_encoder
         if qcfg.mode == "none":
             self.quant_info = None
             return
@@ -400,11 +409,6 @@ class Trainer:
         # The crossover only governs frozen weights, so a straddle warning in training mode would
         # point at a threshold that no longer decides anything.
         self.transformer = quantize_module(self.transformer, qcfg, device, self.dtype, use_qmm)
-        if qcfg.quantize_text_encoder and self.text_encoder is not None:
-            te_cfg = text_encoder_quant_config(qcfg)
-            self.text_encoder = quantize_module(self.text_encoder, te_cfg, device, self.dtype, False)
-            self.components.text_encoder = self.text_encoder
-
         nq, ntotal, _ = quantized_layer_report(self.transformer)
         wmean = sum(t * t for t in tokens) / sum(tokens)
         self.quant_info = (nq, ntotal, use_qmm, max_tokens, wmean)
@@ -429,6 +433,7 @@ class Trainer:
         self.scheduler = build_scheduler(self.optimizer, schedule, self.total_steps * scale)
 
     def _prepare(self):
+        raw_optimizer = self.optimizer
         if self.cfg.quant.mode == "training" and self.accelerator.num_processes > 1:
             from .distributed import sync_quantized_model
             sync_quantized_model(self.transformer)
@@ -437,6 +442,10 @@ class Trainer:
             self.text_encoder.to(device).eval()
         self.transformer, self.optimizer, self.scheduler, self.loader = self.accelerator.prepare(
             self.transformer, self.optimizer, self.scheduler, self.loader)
+        if self.cfg.optimizer.gradient_release:
+            from .optim import enable_gradient_release
+            self._gradient_release_holder = enable_gradient_release(
+                raw_optimizer, self.accelerator.num_processes)
 
 
     # ----------------------------------------------------------- one step
@@ -457,8 +466,8 @@ class Trainer:
             raise ValueError("No captions available for text embedding caching")
         components = load_components(cfg.train.model_path, self.dtype, **model_load_kwargs(cfg.train),
             load_transformer=False, load_vae=False)
-        if cfg.quant.quantize_text_encoder and cfg.quant.mode != "none":
-            q = text_encoder_quant_config(cfg.quant)
+        q = text_encoder_quant_config(cfg.quant)
+        if q is not None:
             components.text_encoder = quantize_module(components.text_encoder, q,
                 self.accelerator.device, self.dtype, False)
         components.text_encoder.to(self.accelerator.device).eval()
@@ -516,8 +525,8 @@ class Trainer:
                 from itertools import chain
                 components = load_components(cfg.train.model_path, self.dtype, **model_load_kwargs(cfg.train),
                     load_transformer=False, load_vae=False)
-                if cfg.quant.quantize_text_encoder and cfg.quant.mode != "none":
-                    q = text_encoder_quant_config(cfg.quant)
+                q = text_encoder_quant_config(cfg.quant)
+                if q is not None:
                     components.text_encoder = quantize_module(components.text_encoder, q,
                         self.accelerator.device, self.dtype, False)
                 components.text_encoder.to(self.accelerator.device).eval()
@@ -691,6 +700,8 @@ class Trainer:
         acc = self.accelerator
         self._report()
 
+        if cfg.optimizer.gradient_release:
+            _emit(self, "optim    gradient release enabled (single GPU; updates during backward)")
         trainable = [p for p in self._all_modules_params() if p.requires_grad]
         done = False
 
@@ -717,13 +728,18 @@ class Trainer:
                 self._set_phase()
                 with acc.accumulate(self.transformer):
                     loss, hf = self._step(batch)
+                    if cfg.optimizer.gradient_release:
+                        self._apply_lr_mul()  # Hook updates happen inside backward.
                     acc.backward(loss)
 
                     if acc.sync_gradients and cfg.optimizer.max_grad_norm > 0:
                         acc.clip_grad_norm_(trainable, cfg.optimizer.max_grad_norm)
 
-                    self._apply_lr_mul()
-                    if cfg.quant.mode == "training" and acc.num_processes > 1 and acc.sync_gradients:
+                    if not cfg.optimizer.gradient_release:
+                        self._apply_lr_mul()
+                    if cfg.optimizer.gradient_release:
+                        pass  # Already stepped and cleared each parameter during backward.
+                    elif cfg.quant.mode == "training" and acc.num_processes > 1 and acc.sync_gradients:
                         from .distributed import quantized_optimizer_rng
                         with quantized_optimizer_rng(acc.device, cfg.train.seed, self.global_step):
                             self.optimizer.step()

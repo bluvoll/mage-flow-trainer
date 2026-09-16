@@ -50,6 +50,10 @@ def _encoder_fingerprint_payload(cfg):
     from ..training.quant import text_encoder_quant_config
 
     quant = text_encoder_quant_config(cfg.quant)
+    quant_payload = asdict(quant) if quant is not None else None
+    if quant_payload is not None:
+        # Selector metadata is not encoder behavior; preserve existing cache keys.
+        quant_payload.pop("text_encoder_weights_dtype", None)
     return dict(
         version=1,
         versions=versions,
@@ -57,7 +61,7 @@ def _encoder_fingerprint_payload(cfg):
         dtype=cfg.train.dtype,
         tokens=cfg.train.max_text_tokens,
         template=(PROMPT_TEMPLATE_ENCODE, PROMPT_TEMPLATE_ENCODE_START_IDX),
-        quant=asdict(quant) if quant is not None else None,
+        quant=quant_payload,
     )
 
 
@@ -89,6 +93,9 @@ def encoder_fingerprint(cfg, cache_path=None):
                 extra_skip=extra,
             )
         )
+        old_quant.pop("text_encoder_weights_dtype", None)
+        # An explicit encoder override must not reuse the transformer's dtype.
+        old_quant["weights_dtype"] = payload["quant"]["weights_dtype"]
         compatible.add(digest({**payload, "quant": old_quant}))
     with closing(
         sqlite3.connect(Path(cache_path).resolve().as_uri() + "?mode=ro", uri=True)

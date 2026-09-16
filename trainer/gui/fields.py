@@ -284,6 +284,26 @@ class ChoiceEditor(_Blockable):
             self.widget.setCurrentIndex(len(self.values) - 1)
 
 
+class OptimizerEditor(ChoiceEditor):
+    """Optimizer families grouped without changing TOML kind names."""
+
+    def __init__(self):
+        from ..training.optimizer_specs import OPTIMIZERS
+        options, values, headers = [], [], []
+        for family in ("PyTorch", "SDNQ", "Optimi"):
+            headers.append(len(options))
+            options.append(f"— {family} —")
+            values.append(None)
+            for kind, spec in OPTIMIZERS.items():
+                if spec.family == family:
+                    options.append(f"{spec.name} ({family})")
+                    values.append(kind)
+        super().__init__(options, values)
+        for index in headers:
+            self.widget.model().item(index).setEnabled(False)
+        self.widget.setCurrentIndex(1)
+
+
 class NumListEditor(_Blockable):
     """Comma-separated numbers. `dataset.resolutions` (ints, empty = single tier) and
     `optimizer.betas` (floats, fixed length)."""

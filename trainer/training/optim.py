@@ -7,6 +7,7 @@ import math
 import torch
 
 from .config import OptimizerConfig, ScheduleConfig
+from .optimizer_specs import OPTIMIZERS
 
 # SDNQ optimizers assert that a param group's keys match their schema exactly, so our bookkeeping
 # key has to come off first. Stock torch optimizers tolerate it, but stripping unconditionally
@@ -24,12 +25,33 @@ def build_optimizer(groups: list[dict], cfg: OptimizerConfig) -> torch.optim.Opt
     kind = cfg.kind.lower()
     clean = _strip(groups)
 
+    if kind.startswith("optimi_"):
+        import optimi
+        spec = OPTIMIZERS[kind]
+        kwargs = dict(lr=cfg.lr, weight_decay=cfg.weight_decay,
+                      kahan_sum=None if cfg.kahan_sum == "auto" else cfg.kahan_sum,
+                      gradient_release=cfg.gradient_release)
+        if spec.betas:
+            kwargs["betas"] = tuple(cfg.betas)
+        if spec.eps is not None:
+            kwargs["eps"] = cfg.eps
+        if kind == "optimi_sgd":
+            kwargs["momentum"] = cfg.momentum
+        optimizer = getattr(optimi, spec.name)(clean, **kwargs)
+        if cfg.gradient_release:
+            # Optimi stores live param-group dictionaries inside per-parameter state.
+            # Do not serialize their parameter references; rebind after resume instead.
+            optimizer.register_state_dict_post_hook(_release_state_dict)
+            optimizer.register_load_state_dict_post_hook(_release_rebind_groups)
+        return optimizer
+
     if kind == "adamw":
         if cfg.quantize_state or cfg.offload_state:
             raise ValueError(
                 "quantize_state/offload_state need an sdnq optimizer; use kind='adamw8bit'"
             )
-        return torch.optim.AdamW(clean, betas=tuple(cfg.betas), eps=cfg.eps)
+        return torch.optim.AdamW(clean, lr=cfg.lr, weight_decay=cfg.weight_decay,
+                                 betas=tuple(cfg.betas), eps=cfg.eps)
 
     if kind not in _SDNQ_KINDS:
         raise ValueError(f"unknown optimizer: {cfg.kind!r} (expected 'adamw' or one of {sorted(_SDNQ_KINDS)})")
@@ -61,6 +83,35 @@ def build_optimizer(groups: list[dict], cfg: OptimizerConfig) -> torch.optim.Opt
     optimizer.register_step_pre_hook(_sdnq_kahan_alias)
     optimizer.register_step_post_hook(_sdnq_remove_kahan_alias)
     return optimizer
+
+
+def _release_state_dict(optimizer, state_dict):
+    return {**state_dict, "state": {
+        key: {k: v for k, v in state.items() if k != "group"}
+        for key, state in state_dict["state"].items()
+    }}
+
+
+def _release_rebind_groups(optimizer):
+    for group in optimizer.param_groups:
+        for param in group["params"]:
+            optimizer.state[param]["group"] = group
+
+
+def enable_gradient_release(optimizer, num_processes=1):
+    """Attach Optimi hooks only to optimized parameters, after Accelerate preparation.
+
+    Return the holder so callers can remove hooks with optimi.remove_gradient_release.
+    DDP's reducer does not synchronize before these hooks update local parameters.
+    """
+    if num_processes != 1:
+        raise ValueError("Optimi gradient release is single-GPU only: DDP synchronization "
+                         "does not precede its parameter-update hooks")
+    from optimi import prepare_for_gradient_release
+    params = list(dict.fromkeys(p for g in optimizer.param_groups for p in g["params"]))
+    holder = torch.nn.ParameterList(params)
+    prepare_for_gradient_release(holder, optimizer)
+    return holder
 
 
 def _sdnq_kahan_alias(optimizer, args, kwargs):

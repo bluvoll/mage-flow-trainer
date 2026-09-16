@@ -458,9 +458,9 @@ SPEC: dict[str, Spec] = {
     # ------------------------------------------------------------------ optimizer
     "optimizer.kind": _spec(
         "Optimizer",
-        "The sdnq variants carry quantizable and offloadable state, which is what makes a 2B full "
-        "finetune fit at all.",
-        lambda: F.ChoiceEditor(["adamw", "adamw8bit", "adafactor", "came", "lion"])),
+        "Grouped by implementation. Switching resets betas, epsilon, weight decay and state options "
+        "to upstream defaults, while retaining your learning rate. SDNQ supports state quantization/offload.",
+        lambda: F.OptimizerEditor()),
     "optimizer.lr": _spec(
         "Learning rate",
         "Scientific notation accepted. Note the schedule changes what a given LR does: mean "
@@ -468,7 +468,7 @@ SPEC: dict[str, Spec] = {
         "moving cosine -> rex at the same LR is a ~1.7x increase in total movement.",
         lambda: F.SciEditor("3e-5")),
     "optimizer.betas": _spec(
-        "Betas", "Two values. 0.9, 0.99 gives a longer second-moment window than the 0.95 default.",
+        "Betas", "Defaults follow the optimizer. SDNQ Adafactor uses a negative decay exponent; CAME and Optimi Adan use three values.",
         lambda: F.FloatListEditor("0.9, 0.99")),
     "optimizer.eps": _spec("Epsilon", "Denominator floor.", lambda: F.SciEditor("1e-8")),
     "optimizer.weight_decay": _spec(
@@ -485,15 +485,20 @@ SPEC: dict[str, Spec] = {
         'Keep SDNQ optimizer state in host memory; trades GPU memory for transfer overhead.',
         lambda: F.BoolEditor("Offload optimizer state to CPU"), inline_label=True),
     "optimizer.use_kahan": _spec(
-        "Kahan summation",
-        "Carry the part of each update that the bf16 cast discarded into the next step, instead "
-        "of losing it. NOT an alternative to stochastic rounding -- sdnq applies both, SR on the "
-        "cast and Kahan on its remainder.\n\nMatters when the step size approaches a bf16 ulp. "
-        "Measured on a rank-8 LoRA at lr 2e-5: step/ulp is 6.8 at peak LR (safe) but falls below "
-        "1 late in a cosine decay, which is where updates start disappearing.\n\nCosts one extra "
-        "buffer per trainable parameter -- 2 bytes with plain buffers, 0.5 with quantized ones. "
-        "sdnq optimizers only; torch adamw keeps fp32 masters and has nothing to correct.",
-        lambda: F.BoolEditor("Kahan summation on the master weight"), inline_label=True),
+        "SDNQ Kahan summation",
+        "SDNQ use_kahan: retain rounding residuals alongside stochastic rounding. Costs an additional buffer.",
+        lambda: F.BoolEditor("SDNQ Kahan summation"), inline_label=True),
+    "optimizer.kahan_sum": _spec(
+        "Optimi Kahan summation",
+        "Optimi kahan_sum: Auto enables compensation for low-precision parameters. Adan defaults to Disabled.",
+        lambda: F.ChoiceEditor(["Optimizer default", "Auto (parameter dtype)", "Enabled", "Disabled"], [None, "auto", True, False])),
+    "optimizer.gradient_release": _spec(
+        "Optimi gradient release",
+        "Update parameters during backward and immediately release gradients. Single GPU only. "
+        "Requires gradient accumulation=1 and gradient clipping=0. DDP is blocked before model loading.",
+        lambda: F.BoolEditor("Optimi gradient release (single GPU)"), inline_label=True),
+    "optimizer.momentum": _spec(
+        "SGD momentum", "Only used by Optimi SGD.", lambda: F.FloatEditor(0.0, 0.9999, 0.01, 4)),
 
     # ------------------------------------------------------------------ schedule
     "schedule.kind": _spec(
@@ -569,7 +574,7 @@ SPEC: dict[str, Spec] = {
     "quant.weights_dtype": _spec(
         "Weight dtype",
         'SDNQ weight storage dtype. Benchmark quality and throughput on your data.',
-        lambda: F.ChoiceEditor(["int8", "fp8", "int7", "int6", "int5", "int4"])),
+        lambda: F.ChoiceEditor(["int8", "uint8", "fp8", "int7", "int6", "int5", "int4"])),
     "quant.use_quantized_matmul": _spec(
         "Quantized matmul",
         'Auto stays off until Mage-Flow measurements establish a useful policy. Explicit on quantizes activations too.',
@@ -586,8 +591,12 @@ SPEC: dict[str, Spec] = {
         lambda: F.StrListEditor("comma separated", height=54)),
 
     "quant.quantize_text_encoder": _spec(
-        "Quantize Qwen3", 'Quantize the frozen Qwen3-VL encoder with SDNQ. Captions are encoded live; the encoder stays frozen even during transformer full finetuning.',
+        "Quantize Qwen3", 'Quantize the frozen Qwen3-VL encoder with SDNQ for loaded or cached text encoding. Independent of transformer quantization: enabled also with quant.mode=none and Optimi.',
         lambda: F.BoolEditor("Quantize the text encoder"), inline_label=True),
+    "quant.text_encoder_weights_dtype": _spec(
+        "Text encoder storage dtype",
+        "Independent encoder storage dtype. Inherit uses transformer storage dtype. Keep INT8 here when comparing INT8 and UINT8 transformer storage to reuse the same text cache.",
+        lambda: F.ChoiceEditor(["Inherit", "int8", "uint8", "fp8"], [None, "int8", "uint8", "fp8"])),
     "quant.dynamic_loss_threshold": _spec(
         "Dynamic loss threshold", "SDNQ internal. Empty = library default.",
         lambda: F.SciEditor(optional=True)),
@@ -674,11 +683,11 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
     ]),
     ("Optimizer", [
         ("Optimizer", [
-            "optimizer.kind", "optimizer.lr", "optimizer.betas", "optimizer.eps",
+            "optimizer.kind", "optimizer.lr", "optimizer.betas", "optimizer.eps", "optimizer.momentum",
             "optimizer.weight_decay", "optimizer.max_grad_norm",
         ]),
         ("Optimizer State", [
-            "optimizer.quantize_state", "optimizer.offload_state", "optimizer.use_kahan",
+            "optimizer.quantize_state", "optimizer.offload_state", "optimizer.use_kahan", "optimizer.kahan_sum", "optimizer.gradient_release",
         ]),
         ("Learning Rate Schedule", [
             "schedule.kind", "schedule.warmup_steps", "schedule.min_lr_ratio",
@@ -705,7 +714,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
         ("SDNQ Quantization", [
             "quant.mode", "quant.weights_dtype", "quant.use_quantized_matmul",
             "quant.skip_policy", "quant.extra_skip",
-            "quant.quantize_text_encoder", "quant.use_stochastic_rounding",
+            "quant.quantize_text_encoder", "quant.text_encoder_weights_dtype", "quant.use_stochastic_rounding",
             "quant.group_size", "quant.dynamic_loss_threshold",
         ]),
     ]),
