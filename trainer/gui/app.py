@@ -82,6 +82,7 @@ def detect_gpus() -> list[tuple[int, str]]:
 _RULES = {
     # Measured: under `uniform`, scale 0.5/1.0/2.0 give byte-identical distributions.
     "flow.sigmoid_scale": lambda c: c.get("flow.timestep_sample_method") == "logit_normal",
+    "flow.dual_timestep_mask_ratio": lambda c: bool(c.get("flow.dual_timestep")),
     "flow.hf_exponent": lambda c: float(c.get("flow.hf_scale") or 0) > 0,
 
     "dataset.resolution": lambda c: not c.get("dataset.resolutions"),

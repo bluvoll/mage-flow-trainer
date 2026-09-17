@@ -31,7 +31,7 @@ from tqdm import tqdm
 from ..data.dataset import MageFlowDataset, BucketBatchSampler, collate
 from ..modeling.loader import model_load_kwargs, load_components, encode_prompts
 from .config import Config, load_config
-from .flow import flow_loss, hf_loss, prepare_flow_batch
+from .flow import flow_loss, hf_loss, prepare_training_flow_batch, effective_timesteps
 from .optim import build_optimizer, build_scheduler, estimate_optimizer_bytes
 from .params import (
     apply_adapter,
@@ -595,7 +595,7 @@ class Trainer:
             latents = batch["latents"].to(device, torch.float32)
 
         stats: dict = {}
-        noisy, timesteps, target = prepare_flow_batch(
+        noisy, timesteps, target, second_t, token_mask = prepare_training_flow_batch(
             latents, self.cfg.flow, stats=stats, t_range=self.phase.t_range if self.phase else None
         )
         self.last_stats = stats
@@ -606,6 +606,8 @@ class Trainer:
             timestep=timesteps.to(self.dtype),
             encoder_hidden_states=encoder_hidden_states,
             return_dict=False,
+            **({"second_timestep": second_t.to(self.dtype), "timestep_mask": token_mask}
+               if second_t is not None else {}),
         )[0]
 
         # (B,1,h,w) -> (B,1,1,h,w) to broadcast over the latent's channel and time axes. Texture
@@ -624,7 +626,8 @@ class Trainer:
         # The mask goes through here too: weighting unsupervised context by its detail content
         # would put a target back on exactly the region the mask exists to exclude.
         hf = self.cfg.flow.hf_scale * hf_loss(
-            pred, noisy, latents, timesteps, self.hf_patch, self.cfg.flow.hf_exponent, mask=mask
+            pred, noisy, latents, effective_timesteps(timesteps, second_t, token_mask),
+            self.hf_patch, self.cfg.flow.hf_exponent, mask=mask
         )
         return loss + hf, hf
 
@@ -632,11 +635,13 @@ class Trainer:
         device = self.accelerator.device
         latents = ([self._encode_pixels(x.to(device,self.dtype)) for x in batch["pixels"]]
                    if "pixels" in batch else [x.to(device,torch.float32) for x in batch["latents"]])
-        prepared = [prepare_flow_batch(x,self.cfg.flow) for x in latents]
-        noisy,times,targets = zip(*prepared)
+        prepared = [prepare_training_flow_batch(x,self.cfg.flow) for x in latents]
+        noisy,times,targets,second_times,token_masks = zip(*prepared)
         context = self._encode(batch["captions"])
         predictions = self.transformer(hidden_states=[x.to(self.dtype) for x in noisy],
-            timestep=torch.cat(times).to(self.dtype), encoder_hidden_states=context)[0]
+            timestep=torch.cat(times).to(self.dtype), encoder_hidden_states=context,
+            **({"second_timestep": torch.cat(second_times).to(self.dtype),
+                "timestep_mask": token_masks} if self.cfg.flow.dual_timestep else {}))[0]
         # Equal sample weighting: a large image must not gain extra influence merely
         # because it contributes more tokens to the packed attention kernel.
         loss = torch.stack([flow_loss(y,t) for y,t in zip(predictions,targets)]).mean()
@@ -645,8 +650,8 @@ class Trainer:
         if self.hf_patch is None:
             return loss,None
         hf = self.cfg.flow.hf_scale * torch.stack([
-            hf_loss(y,n,x,t,self.hf_patch,self.cfg.flow.hf_exponent)
-            for y,n,x,t in zip(predictions,noisy,latents,times)]).mean()
+            hf_loss(y,n,x,effective_timesteps(t,s,m),self.hf_patch,self.cfg.flow.hf_exponent)
+            for y,n,x,t,s,m in zip(predictions,noisy,latents,times,second_times,token_masks)]).mean()
         return loss+hf,hf
 
     def _preserve_term(self) -> torch.Tensor | float:
@@ -918,6 +923,8 @@ class Trainer:
         if f.timestep_sample_method == "logit_normal":
             flow_bits.append(f"sigmoid_scale {f.sigmoid_scale}")
         flow_bits.append("flux_shift" if f.flux_shift else f"shift {f.shift if f.shift else 'none'}")
+        if f.dual_timestep:
+            flow_bits.append(f"dual timestep ON (mask={f.dual_timestep_mask_ratio:g}; no teacher)")
         if f.use_ot:
             # Batch size 1 makes OT a no-op, and the per-bucket map can produce one silently.
             ones = [b for b in self.sampler.bucket_indices

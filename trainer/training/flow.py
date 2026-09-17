@@ -44,6 +44,8 @@ class FlowConfig:
     shift: float | None = 6.0       # static shift; mutually exclusive with flux_shift
     flux_shift: bool = False         # resolution-dependent shift
     use_ot: bool = False             # cosine optimal-transport noise pairing
+    dual_timestep: bool = False       # Self-Flow noising only; no teacher/EMA loss
+    dual_timestep_mask_ratio: float = 0.25
     # How a curriculum phase's `t_range` restricts the draw. Inert without a curriculum.
     phase_mapping: str = "rescale"   # "rescale" | "truncate" -- see sample_timesteps
 
@@ -53,6 +55,8 @@ class FlowConfig:
     hf_exponent: float = 1.0         # gamma; >1 concentrates on the highest-detail tokens
 
     def __post_init__(self):
+        if not 0 < self.dual_timestep_mask_ratio <= 0.5:
+            raise ValueError("dual_timestep_mask_ratio must be in (0, 0.5]")
         if self.shift is not None and self.flux_shift:
             raise ValueError("set either `shift` or `flux_shift`, not both")
         # shift <= 0 is not "shift off" -- the map (t*shift)/(1+(shift-1)*t) sends every t to 0 at
@@ -255,6 +259,36 @@ def prepare_flow_batch(
     return noisy_latents, t, target
 
 
+def effective_timesteps(t, second_t=None, token_mask=None):
+    """Broadcastable per-pixel time, also used by x0 reconstruction in HF loss."""
+    primary = t.view(-1, 1, 1, 1, 1)
+    if second_t is None:
+        return primary
+    return torch.where(token_mask[:, None, None], second_t.view(-1, 1, 1, 1, 1), primary)
+
+
+def prepare_training_flow_batch(latents, cfg, **kwargs):
+    """Preserve ordinary RNG/output exactly when disabled; share one noise draw.
+
+    Mage-Flow uses one image token per latent pixel. Both times use the same
+    distribution, shift and curriculum range. OT pairing happens only once.
+    """
+    noisy, t, target = prepare_flow_batch(latents, cfg, **kwargs)
+    if not cfg.dual_timestep:
+        return noisy, t, target, None, None
+    b, _, _, h, w = latents.shape
+    if latents.shape[2] != 1:
+        raise ValueError("Dual-timestep training currently supports images only")
+    second = sample_timesteps(cfg, b, h, w, latents.device,
+                              generator=kwargs.get('generator'), quantile=kwargs.get('quantile'),
+                              t_range=kwargs.get('t_range'))
+    mask = torch.rand((b, h, w), device=latents.device,
+                      generator=kwargs.get('generator')) < cfg.dual_timestep_mask_ratio
+    # Reuse already paired noise via velocity; do not independently re-noise tokens.
+    noisy = latents.float() + effective_timesteps(t, second, mask) * target
+    return noisy, t, target, second, mask
+
+
 def flow_loss(
     model_pred: torch.Tensor,
     target: torch.Tensor,
@@ -362,7 +396,10 @@ def hf_loss(
         raise ValueError(f"latent {h}x{w} is not divisible by the patch size {patch}")
 
     clean = clean.reshape(b, c, h, w).float()
-    x0_pred = (noisy.float() - timesteps.float().view(-1, 1, 1, 1, 1) * model_pred.float())
+    times = timesteps.float()
+    if times.ndim == 1:
+        times = times.view(-1, 1, 1, 1, 1)
+    x0_pred = noisy.float() - times * model_pred.float()
     x0_pred = x0_pred.reshape(b, c, h, w)
 
     # `clean` is data and carries no grad, so the weights are already constant; detach anyway so a

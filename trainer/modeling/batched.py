@@ -76,11 +76,14 @@ def _double_stream_block_forward(
 
     if token_sample_ids is not None:
         img_ids, txt_ids = token_sample_ids
+        def select(m, ids):
+            selected = m[ids]
+            return selected.unsqueeze(0) if ids.ndim == 1 else selected
         img_mod1, img_mod2 = (
-            m.index_select(0, img_ids).unsqueeze(0) for m in (img_mod1, img_mod2)
+            select(m, img_ids) for m in (img_mod1, img_mod2)
         )
         txt_mod1, txt_mod2 = (
-            m.index_select(0, txt_ids).unsqueeze(0) for m in (txt_mod1, txt_mod2)
+            select(m, txt_ids) for m in (txt_mod1, txt_mod2)
         )
 
     # --- norm1 + modulation ---

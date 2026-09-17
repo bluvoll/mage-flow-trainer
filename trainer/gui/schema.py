@@ -401,6 +401,16 @@ SPEC: dict[str, Spec] = {
         lambda: F.BoolEditor("Pin the first NL sentence"), inline_label=True),
 
     # ------------------------------------------------------------------ flow
+    "flow.dual_timestep": _spec(
+        "Dual-timestep noising (experimental)",
+        "Self-Flow noising only: assign a second sampled timestep to a subset of image tokens. "
+        "No EMA teacher or alignment loss. Potential convergence gains require validation.",
+        lambda: F.BoolEditor("Enable dual-timestep noising"), inline_label=True),
+    "flow.dual_timestep_mask_ratio": _spec(
+        "Second-timestep token fraction",
+        "Probability of assigning each image token the second timestep; range (0, 0.5]. "
+        "Only used when dual-timestep noising is enabled. Default 0.25.",
+        lambda: F.FloatEditor(0.001, 0.5, 0.05, 3)),
     "flow.timestep_sample_method": _spec(
         "Timestep sampling",
         "logit_normal concentrates t near 0.5; uniform is flat.\n\nNo per-timestep loss weighting "
@@ -720,6 +730,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
         ("Flow Matching", [
             "flow.timestep_sample_method", "flow.sigmoid_scale", "flow.shift",
             "flow.flux_shift", "flow.use_ot", "flow.phase_mapping",
+            "flow.dual_timestep", "flow.dual_timestep_mask_ratio",
         ]),
         ("High-Frequency Token Loss", [
             "flow.hf_scale", "flow.hf_exponent",

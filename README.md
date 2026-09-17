@@ -72,6 +72,30 @@ CUDA_VISIBLE_DEVICES=0 .venv/bin/python -m trainer.training.train configs/my-run
 
 This preset is derived from `bisque-mageflow-lora-SDQN-AdamW.toml`, with batch size 1, accumulation 1, and a 10-step limit. For a real run, increase/remove `max_steps` and enable checkpoint/final saves. The original local preset uses larger batches and is not the configuration measured below.
 
+## Dual-timestep noising (experimental)
+
+Enable **Dual-timestep noising** in the GUI's flow settings, or add:
+
+```toml
+[flow]
+dual_timestep = true
+dual_timestep_mask_ratio = 0.25
+```
+
+This implements the dual-timestep noising component of
+[Self-Flow](https://arxiv.org/abs/2603.06507): each image receives two sampled
+noise levels, with the second assigned to a random fraction of image tokens.
+Each token is conditioned on its own timestep; text keeps the primary timestep.
+Both draws use your configured timestep distribution, shift and curriculum range.
+The mask ratio must be greater than zero and at most 0.5.
+
+There is no EMA teacher, additional model, or feature-alignment loss. Cached
+latents and Cached Text Encoder embeddings remain reusable. It works with
+adapters and finetuning, including native-resolution packing, checkpointing and
+the high-frequency loss. Inference and checkpoint weight layouts are unchanged.
+It defaults to off. Faster convergence on Mage-Flow finetunes is a hypothesis
+to evaluate against ordinary training; individual steps are not guaranteed faster.
+
 ## Augmented text cache
 
 ```toml

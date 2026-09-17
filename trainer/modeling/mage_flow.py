@@ -156,11 +156,13 @@ class MageFlow(nn.Module):
         return temb
 
     def forward(
-        self, hidden_states, timestep, encoder_hidden_states, return_dict=False
+        self, hidden_states, timestep, encoder_hidden_states, return_dict=False,
+        second_timestep=None, timestep_mask=None,
     ):
         if isinstance(hidden_states, list):
             return (
-                self.forward_packed(hidden_states, timestep, encoder_hidden_states),
+                self.forward_packed(hidden_states, timestep, encoder_hidden_states,
+                                    second_timestep, timestep_mask),
             )
         # The data/loss layer retains a singleton frame axis for image tensors.
         if hidden_states.ndim != 5 or hidden_states.shape[2] != 1:
@@ -174,6 +176,16 @@ class MageFlow(nn.Module):
         text, text_mask = encoder_hidden_states
         img = self.img_in(image.flatten(2).transpose(1, 2))
         txt = self.txt_in(self.txt_norm(text))
+        token_ids = None
+        if (second_timestep is None) != (timestep_mask is None):
+            raise ValueError("Dual conditioning requires both second_timestep and timestep_mask")
+        if second_timestep is not None:
+            if second_timestep.shape != timestep.shape or timestep_mask.shape != (b, h, w):
+                raise ValueError("Dual timestep/mask shape does not match image batch")
+            sample_ids = torch.arange(b, device=img.device)[:, None]
+            image_ids = sample_ids + timestep_mask.flatten(1).long() * b
+            token_ids = (image_ids, sample_ids.expand(b, txt.shape[1]))
+            timestep = torch.cat((timestep, second_timestep))
         temb = self.time_text_embed(timestep.to(img.dtype), img)
         block_temb = self.block_condition(temb)
         freqs = self.pos_embed([(1, h, w)], device=img.device)
@@ -201,6 +213,7 @@ class MageFlow(nn.Module):
                 self.attention_backend,
                 metadata,
                 False,
+                token_ids,
             )
             if self.training and i in self.checkpoint_blocks:
                 txt, img = checkpoint(self.block_forward, *args, use_reentrant=False)
@@ -209,13 +222,16 @@ class MageFlow(nn.Module):
         scale, shift = self.norm_out.linear(
             self.norm_out.silu(temb).to(img.dtype)
         ).chunk(2, dim=-1)
-        img = self.norm_out.norm(img) * (1 + scale[:, None]) + shift[:, None]
+        if token_ids is None:
+            img = self.norm_out.norm(img) * (1 + scale[:, None]) + shift[:, None]
+        else:
+            img = self.norm_out.norm(img) * (1 + scale[image_ids]) + shift[image_ids]
         result = (
             self.proj_out(img).transpose(1, 2).reshape(b, self.out_channels, 1, h, w)
         )
         return (result,)
 
-    def forward_packed(self, images, timestep, context):
+    def forward_packed(self, images, timestep, context, second_timestep=None, timestep_mask=None):
         """Pack heterogeneous native resolutions through the entire MMDiT.
 
         Each image retains its own RoPE origin and timestep modulation. Joint
@@ -243,6 +259,14 @@ class MageFlow(nn.Module):
         img = torch.cat([im.flatten(2).transpose(1, 2) for im in images], dim=1)
         img = self.img_in(img)
         txt = self.txt_in(self.txt_norm(txt))
+        if (second_timestep is None) != (timestep_mask is None):
+            raise ValueError("Dual conditioning requires both second_timestep and timestep_mask")
+        if second_timestep is not None:
+            if second_timestep.shape != timestep.shape or len(timestep_mask) != len(images):
+                raise ValueError("Dual timestep/mask shape does not match packed batch")
+            if any(m.shape != (1, *shape) for m, shape in zip(timestep_mask, shapes)):
+                raise ValueError("Each packed timestep mask must match its image token grid")
+            timestep = torch.cat((timestep, second_timestep))
         temb = self.time_text_embed(timestep.to(img.dtype), img)
         block_temb = self.block_condition(temb)
         img_ids = torch.tensor(
@@ -251,6 +275,8 @@ class MageFlow(nn.Module):
         txt_ids = torch.tensor(
             [i for i, n in enumerate(text_lengths) for _ in range(n)], device=device
         )
+        if second_timestep is not None:
+            img_ids = img_ids + torch.cat([m.flatten().long() for m in timestep_mask]) * len(images)
         # Call separately: multiple reference images in upstream RoPE use different
         # frame offsets, while independent training images must each start at zero.
         freqs = torch.cat(
