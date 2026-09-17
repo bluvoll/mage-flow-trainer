@@ -218,3 +218,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_fractional_warmup_is_percentage_of_total_steps():
+    values = curve(ScheduleConfig(kind="constant", warmup_steps=0.1), 100)
+    assert values[0] == 0.1
+    assert values[8] == 0.9
+    assert values[9] == 1.0
+    assert values[-1] == 1.0
+

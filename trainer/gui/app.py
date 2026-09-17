@@ -92,6 +92,8 @@ _RULES = {
     "dataset.min_bucket_reso": lambda c: not c.get("dataset.bucket_no_upscale", True),
     "dataset.caption.mixed_weights": lambda c: c.get("dataset.caption.caption_mode") == "mixed",
     "dataset.caption.shuffle_keep_first_n": lambda c: bool(c.get("dataset.caption.shuffle_tags")),
+    "dataset.caption.tag_dropout_percent": lambda c: not (c.get("dataset.caption.tag_min_count", 0) or c.get("dataset.caption.tag_max_count", 0)),
+    "dataset.caption.min_tags_kept": lambda c: not (c.get("dataset.caption.tag_min_count", 0) or c.get("dataset.caption.tag_max_count", 0)),
     "dataset.caption.nl_keep_first_sentence":
         lambda c: bool(c.get("dataset.caption.nl_shuffle_sentences")),
 

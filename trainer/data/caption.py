@@ -32,7 +32,9 @@ class CaptionConfig:
     tag_delimiter: str = ", "
     shuffle_keep_first_n: int = 0     # keep N leading tags in place (trigger words)
     tag_dropout_percent: float = 0.0  # fraction of tags dropped per sample
-    min_tags_kept: int = 3            # never drop below this many
+    min_tags_kept: int = 3            # never drop below this many (ignored when tag_min_count/max_count are active)
+    tag_min_count: int = 0             # keep a random count of flexible tags; 0/0 disables range sampling
+    tag_max_count: int = 0
     protected_tags: set[str] = field(default_factory=set)
 
     caption_dropout_percent: float = 0.0  # fraction of samples trained unconditional
@@ -50,6 +52,12 @@ class CaptionConfig:
             raise ValueError("tag_dropout_percent must be in [0,1]")
         if not 0.0 <= self.caption_dropout_percent <= 1.0:
             raise ValueError("caption_dropout_percent must be in [0,1]")
+        if self.tag_min_count < 0 or self.tag_max_count < 0:
+            raise ValueError("tag_min_count/tag_max_count must be >= 0")
+        if (self.tag_min_count == 0) != (self.tag_max_count == 0):
+            raise ValueError("tag_min_count and tag_max_count must both be 0, or both be > 0")
+        if self.tag_min_count > self.tag_max_count:
+            raise ValueError("tag_min_count must be <= tag_max_count")
 
     @classmethod
     def from_dict(cls, d: dict) -> CaptionConfig:
@@ -80,29 +88,43 @@ def split_tags(caption: str, delimiter: str = ", ") -> list[str]:
 
 
 def process_tags(tags: list[str], cfg: CaptionConfig, rng: random.Random) -> list[str]:
-    """Apply dropout then shuffling, respecting protected and pinned-leading tags."""
+    """Apply tag-count sampling/dropout, respecting protected and pinned-leading tags.
+
+    When ``tag_min_count``/``tag_max_count`` are enabled, exactly a random number of
+    flexible tags is kept from the inclusive range. Protected tags and pinned leading
+    tags are always retained and do not count toward that range. This deliberately
+    ignores the legacy per-tag dropout controls so the two sampling modes cannot fight.
+    """
     if not tags:
         return tags
 
     keep_n = min(cfg.shuffle_keep_first_n, len(tags))
     head, tail = tags[:keep_n], tags[keep_n:]
+    protected = [t for t in tail if t.lower() in cfg.protected_tags]
+    flexible = [t for t in tail if t.lower() not in cfg.protected_tags]
 
-    if cfg.tag_dropout_percent > 0 and tail:
-        # Leading pinned tags and protected tags are exempt from dropout.
-        keepable = [t for t in tail if t.lower() in cfg.protected_tags]
-        droppable = [t for t in tail if t.lower() not in cfg.protected_tags]
-
-        n_drop = int(len(droppable) * cfg.tag_dropout_percent + 0.5)
-        # Enforce the floor across the whole caption, not just the droppable subset.
-        max_droppable = max(0, len(head) + len(keepable) + len(droppable) - cfg.min_tags_kept)
+    range_sampling = cfg.tag_min_count > 0 or cfg.tag_max_count > 0
+    if range_sampling:
+        target = rng.randint(cfg.tag_min_count, cfg.tag_max_count)
+        target = min(target, len(flexible))
+        if target < len(flexible):
+            keep_idx = set(rng.sample(range(len(flexible)), target))
+            kept_flexible = [t for i, t in enumerate(flexible) if i in keep_idx]
+        else:
+            kept_flexible = flexible
+        kept = set(kept_flexible) | set(protected)
+        tail = [t for t in tail if t in kept]
+    elif cfg.tag_dropout_percent > 0 and flexible:
+        n_drop = int(len(flexible) * cfg.tag_dropout_percent + 0.5)
+        # Enforce the legacy floor across the whole caption, including pinned/protected tags.
+        max_droppable = max(0, len(head) + len(protected) + len(flexible) - cfg.min_tags_kept)
         n_drop = min(n_drop, max_droppable)
 
         if n_drop > 0:
-            survivors = set(rng.sample(range(len(droppable)), len(droppable) - n_drop))
-            droppable = [t for i, t in enumerate(droppable) if i in survivors]
+            survivors = set(rng.sample(range(len(flexible)), len(flexible) - n_drop))
+            flexible = [t for i, t in enumerate(flexible) if i in survivors]
 
-        # Rebuild preserving original relative order.
-        kept = set(keepable) | set(droppable)
+        kept = set(protected) | set(flexible)
         tail = [t for t in tail if t in kept]
 
     if cfg.shuffle_tags:

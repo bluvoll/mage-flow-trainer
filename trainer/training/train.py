@@ -429,7 +429,11 @@ class Trainer:
         # burns through `num_processes`x too fast -- on 2 GPUs a cosine decay reached its floor at
         # the halfway point and trained the rest of the run at lr 0.
         scale = self.accelerator.num_processes
-        schedule = replace(cfg.schedule, warmup_steps=cfg.schedule.warmup_steps * scale)
+        raw_warmup = float(cfg.schedule.warmup_steps)
+        # Fractions are resolved inside build_scheduler against the scaled total horizon;
+        # absolute step counts still need the DDP scale used by Accelerate's inner scheduler.
+        warmup = raw_warmup if 0.0 < raw_warmup < 1.0 else raw_warmup * scale
+        schedule = replace(cfg.schedule, warmup_steps=warmup)
         self.scheduler = build_scheduler(self.optimizer, schedule, self.total_steps * scale)
 
     def _prepare(self):
