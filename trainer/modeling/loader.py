@@ -142,7 +142,25 @@ def load_components(
                 vae = AutoencoderKLFlux2()
                 result = vae.load_state_dict(state, strict=False)
                 if result.missing_keys or result.unexpected_keys:
-                    raise RuntimeError(f"FLUX.2 VAE load failed: missing={result.missing_keys}, unexpected={result.unexpected_keys}")
+                    # ComfyUI's Flux2 VAE export uses the original LDM key layout.
+                    # Its Legacy engine already pixel-unshuffles and applies `bn` in
+                    # encode(), producing exactly Mage-Flow's 128c /16 latent layout.
+                    if "bn.running_mean" not in state or "encoder.quant_conv.weight" not in state:
+                        raise RuntimeError(f"FLUX.2 VAE load failed: missing={result.missing_keys}, unexpected={result.unexpected_keys}")
+                    import sys
+                    comfy_root = Path("/home/bluvoll/ComfyUI")
+                    if str(comfy_root) not in sys.path:
+                        sys.path.insert(0, str(comfy_root))
+                    from comfy.ldm.models.autoencoder import AutoencodingEngineLegacy
+                    ddconfig = {"double_z": True, "z_channels": 32, "resolution": 256,
+                                "in_channels": 3, "out_ch": 3, "ch": 128,
+                                "ch_mult": [1, 2, 4, 4], "num_res_blocks": 2,
+                                "attn_resolutions": [], "dropout": 0.0,
+                                "batch_norm_latent": True}
+                    vae = AutoencodingEngineLegacy(embed_dim=32, ddconfig=ddconfig,
+                        regularizer_config={"target": "comfy.ldm.models.autoencoder.DiagonalGaussianRegularizer"})
+                    result = vae.load_state_dict(state, strict=True)
+                    vae.outputs_packed_flux2 = True
         else:
             from .modules.mage_vae import MageVAE
             vae = MageVAE(str(vae_path or path / "vae/diffusion_pytorch_model.safetensors"), sample_posterior=False)

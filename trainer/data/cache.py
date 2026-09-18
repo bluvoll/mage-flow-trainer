@@ -83,7 +83,7 @@ class LatentCacher:
             raise ValueError("Mage-VAE only supports image batches")
         encoded = self.vae.encode(x.squeeze(2).to(self.device, self.dtype))
         latents = encoded.latent_dist.mean if hasattr(encoded, "latent_dist") else encoded
-        if self.flux2_vae:
+        if self.flux2_vae and not getattr(self.vae, "outputs_packed_flux2", False):
             latents = torch.nn.functional.pixel_unshuffle(latents, 2)
             bn = getattr(self.vae, "bn", None)
             if bn is None: raise ValueError("FLUX.2 VAE must expose bn running statistics")

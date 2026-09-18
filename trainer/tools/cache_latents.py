@@ -15,6 +15,7 @@ reports both and refuses to bless the directory unless neither exists.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -113,6 +114,21 @@ def cmd_cache(args) -> int:
     # generic filenames, but do not let a GUI/CLI wiring omission feed Flux
     # weights into MageVAE and fail several seconds after planning the cache.
     args.flux2_vae = bool(args.flux2_vae or "flux2" in Path(args.vae_path or "").name.lower())
+    # The common ComfyUI `flux2-vae.safetensors` export is the legacy LDM
+    # implementation. Its compatible module is shipped with ComfyUI and is
+    # compiled for ComfyUI's Python, not this trainer's virtualenv. Re-exec
+    # only that cache operation there; training subsequently reads ordinary
+    # safetensor latents and remains in this environment.
+    if args.flux2_vae and args.vae_path:
+        from safetensors import safe_open
+        with safe_open(str(args.vae_path), framework="pt") as handle:
+            legacy_comfy_flux2 = "bn.running_mean" in handle.keys() and "encoder.quant_conv.weight" in handle.keys()
+        comfy_python = Path("/home/bluvoll/ComfyUI/venv/bin/python")
+        if legacy_comfy_flux2 and Path(sys.executable).resolve() != comfy_python.resolve():
+            if not comfy_python.is_file():
+                raise RuntimeError("This legacy ComfyUI FLUX.2 VAE needs /home/bluvoll/ComfyUI/venv/bin/python for caching.")
+            print("restarting cache under ComfyUI's Python for the legacy FLUX.2 VAE", flush=True)
+            os.execv(str(comfy_python), [str(comfy_python), *sys.argv])
     print(f"\nloading {'FLUX.2' if args.flux2_vae else 'Mage'} VAE from {args.vae_path or args.model_path}")
     components = load_components(
         args.model_path, dtype=torch.bfloat16,
