@@ -116,6 +116,39 @@ class LatentCacher:
         )
         return out, meta
 
+    def cache_batch(
+        self, image_paths: list[str | Path], bucket_mgr: BucketManager, overwrite: bool = False
+    ) -> list[tuple[Path, dict]]:
+        """Cache same-bucket images through one VAE forward.
+
+        The caller groups by resolved bucket. Keeping the grouping outside the
+        encoder lets native-resolution datasets retain their normal bucket
+        selection while still amortising VAE launches.
+        """
+        prepared = []
+        for image_path in image_paths:
+            img, meta = load_and_crop(image_path, bucket_mgr)
+            out = cache_path(image_path, meta["bucket"])
+            if overwrite or not out.exists():
+                prepared.append((Path(image_path), out, meta, image_to_tensor(img)))
+        if not prepared:
+            return []
+        latents = self.encode_tensor(torch.cat([row[3] for row in prepared], dim=0))
+        written = []
+        for (image_path, out, meta, _), latent in zip(prepared, latents):
+            save_file(
+                {"latents": latent.contiguous()}, out,
+                metadata={
+                    "version": CACHE_VERSION,
+                    "bucket": f"{meta['bucket'][0]}x{meta['bucket'][1]}",
+                    "original_size": f"{meta['original_size'][0]}x{meta['original_size'][1]}",
+                    "crop_ltrb": ",".join(str(v) for v in meta["crop_ltrb"]),
+                    "source": hashlib.sha256(str(image_path.name).encode()).hexdigest()[:16],
+                },
+            )
+            written.append((out, meta))
+        return written
+
 
 def load_cached_latent(path: str | Path) -> torch.Tensor:
     tensor = load_file(path)["latents"]

@@ -36,6 +36,8 @@ def _images(root: Path) -> list[Path]:
 
 
 def cmd_cache(args) -> int:
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1")
     devices = [d.strip() for d in (args.devices or "").split(",") if d.strip()]
     if len(devices) > 1 and args.num_shards == 1:
         # One coordinator spawns one independent encoder per selected physical GPU.
@@ -158,18 +160,23 @@ def cmd_cache(args) -> int:
     )
     cacher = LatentCacher(components.vae, device=args.device, flux2_vae=args.flux2_vae)
 
-    total = sum(len(v) for v in plan.values())
-    done = skipped = 0
-    for i, p in enumerate(files, 1):
-        for tier, bucket in plan[p]:
-            if cache_path(p, bucket).exists() and not args.overwrite:
-                skipped += 1
-                continue
-            cacher.cache_image(p, managers[tier], overwrite=args.overwrite)
-            done += 1
-        if i % 25 == 0 or i == len(files):
-            print(f"  {i}/{len(files)} images  cached {done}, skipped {skipped} "
-                  f"(of {total})", flush=True)
+    work: dict[tuple[int, tuple[int, int]], list[Path]] = {}
+    for path in files:
+        for tier, bucket in plan[path]:
+            work.setdefault((tier, bucket), []).append(path)
+    total = sum(len(paths) for paths in work.values())
+    done = skipped = seen = 0
+    for (tier, bucket), paths in work.items():
+        for start in range(0, len(paths), args.batch_size):
+            batch = paths[start:start + args.batch_size]
+            pending = [path for path in batch if args.overwrite or not cache_path(path, bucket).exists()]
+            skipped += len(batch) - len(pending)
+            if pending:
+                cacher.cache_batch(pending, managers[tier], overwrite=args.overwrite)
+                done += len(pending)
+            seen += len(batch)
+            if seen % 25 < len(batch) or seen == total:
+                print(f"  {seen}/{total} cache entries  cached {done}, skipped {skipped}", flush=True)
 
     print(f"\ncached {done}, skipped {skipped} (already present)")
     return 0
@@ -296,6 +303,7 @@ def main() -> int:
     c.add_argument("--dry-run", action="store_true",
                    help="report the bucket plan and cache size, write nothing")
     c.add_argument("--device", default="cuda")
+    c.add_argument("--batch-size", type=int, default=1, help="Images per VAE encode within one resolved bucket")
     c.add_argument("--devices", default="", help="Comma-separated physical GPU IDs; launches one cache shard per GPU")
     c.add_argument("--shard-index", type=int, default=0, help=argparse.SUPPRESS)
     c.add_argument("--num-shards", type=int, default=1, help=argparse.SUPPRESS)
