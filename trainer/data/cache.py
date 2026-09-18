@@ -71,16 +71,24 @@ def image_to_tensor(img: Image.Image) -> torch.Tensor:
 class LatentCacher:
     """Encode Mage-VAE posterior means without additional scaling or normalization."""
 
-    def __init__(self, vae, device: torch.device | str = "cuda", dtype: torch.dtype = torch.bfloat16):
+    def __init__(self, vae, device: torch.device | str = "cuda", dtype: torch.dtype = torch.bfloat16, flux2_vae: bool = False):
         self.vae = vae.to(device).eval()
         self.device = torch.device(device)
         self.dtype = dtype
+        self.flux2_vae = flux2_vae
     @torch.no_grad()
     def encode_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """[B,3,1,H,W] pixels -> [B,128,1,H/16,W/16], without rescaling."""
         if x.ndim != 5 or x.shape[2] != 1:
             raise ValueError("Mage-VAE only supports image batches")
-        return self.vae.encode(x.squeeze(2).to(self.device, self.dtype)).float().unsqueeze(2)
+        encoded = self.vae.encode(x.squeeze(2).to(self.device, self.dtype))
+        latents = encoded.latent_dist.mean if hasattr(encoded, "latent_dist") else encoded
+        if self.flux2_vae:
+            latents = torch.nn.functional.pixel_unshuffle(latents, 2)
+            bn = getattr(self.vae, "bn", None)
+            if bn is None: raise ValueError("FLUX.2 VAE must expose bn running statistics")
+            latents = (latents - bn.running_mean[None, :, None, None].to(latents)) / (bn.running_var[None, :, None, None].to(latents) + bn.eps).sqrt()
+        return latents.float().unsqueeze(2)
 
     def encode(self, img: Image.Image) -> torch.Tensor:
         return self.encode_tensor(image_to_tensor(img)).squeeze(0).to(torch.float32)  # (128, 1, h, w)

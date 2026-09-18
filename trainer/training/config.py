@@ -165,6 +165,7 @@ class TrainConfig:
     transformer_path: str | None = None
     text_encoder_path: str | None = None
     vae_path: str | None = None
+    flux2_vae: bool = False  # Experimental: pack FLUX.2 32c/8x latents to Mage's 128c/16x layout.
     tokenizer_path: str | None = None
     output_dir: str = "output"
     run_name: str = "mageflow"
@@ -428,6 +429,8 @@ def load_config(path: str | Path) -> Config:
             raise ValueError("RTI currently supports full finetuning only; adapters cannot export its interface")
         if cfg.train.compile and not cfg.train.compile_dynamic:
             raise ValueError("RTI compilation requires train.compile_dynamic=true")
+    if cfg.train.flux2_vae and cfg.is_lora:
+        raise ValueError("train.flux2_vae is an experimental full-finetune path; set adapter.kind='none'.")
     if cfg.adapter.kind == "lycoris_lora" and cfg.preserve.enabled:
         raise ValueError("Concept preservation is not supported with lycoris_lora")
     if cfg.is_lora:

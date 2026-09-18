@@ -16,7 +16,7 @@ ASSETS = Path(__file__).with_name("assets")
 
 def model_load_kwargs(train):
     return {name: getattr(train, name, "float32" if name == "compressed_adaln_dtype" else None) for name in
-            ("transformer_path", "text_encoder_path", "vae_path", "tokenizer_path", "compressed_adaln_dtype")}
+            ("transformer_path", "text_encoder_path", "vae_path", "tokenizer_path", "compressed_adaln_dtype", "flux2_vae")}
 
 
 def text_sources(path, text_encoder_path=None, tokenizer_path=None):
@@ -63,6 +63,7 @@ def load_components(
     vae_path=None,
     tokenizer_path=None,
     compressed_adaln_dtype="float32",
+    flux2_vae=False,
 ):
     path = Path(path)
     transformer = None
@@ -130,14 +131,22 @@ def load_components(
             tokenizer_source, padding_side="right", local_files_only=True
         )
     if load_vae:
-        from .modules.mage_vae import MageVAE
-
-        vae = MageVAE(
-            str(vae_path or path / "vae/diffusion_pytorch_model.safetensors"),
-            sample_posterior=False,
-        )
-        # Training only encodes; discard the decoder before moving the VAE to GPU.
-        del vae.decoder_model
+        if flux2_vae:
+            from diffusers import AutoencoderKLFlux2
+            source = Path(vae_path) if vae_path else path / "vae"
+            if source.is_dir():
+                vae = AutoencoderKLFlux2.from_pretrained(source, torch_dtype=dtype)
+            else:
+                state = load_file(str(source))
+                state = {k.removeprefix("first_stage_model.").removeprefix("module."): v for k, v in state.items()}
+                vae = AutoencoderKLFlux2()
+                result = vae.load_state_dict(state, strict=False)
+                if result.missing_keys or result.unexpected_keys:
+                    raise RuntimeError(f"FLUX.2 VAE load failed: missing={result.missing_keys}, unexpected={result.unexpected_keys}")
+        else:
+            from .modules.mage_vae import MageVAE
+            vae = MageVAE(str(vae_path or path / "vae/diffusion_pytorch_model.safetensors"), sample_posterior=False)
+            del vae.decoder_model
         vae.requires_grad_(False).eval().to(dtype=dtype)
     return MageFlowComponents(transformer, encoder, vae, tokenizer)
 

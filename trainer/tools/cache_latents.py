@@ -113,9 +113,10 @@ def cmd_cache(args) -> int:
     components = load_components(
         args.model_path, dtype=torch.bfloat16,
         vae_path=args.vae_path,
+        flux2_vae=args.flux2_vae,
         load_text_encoder=False, load_vae=True, load_tokenizers=False, load_transformer=False,
     )
-    cacher = LatentCacher(components.vae, device=args.device)
+    cacher = LatentCacher(components.vae, device=args.device, flux2_vae=args.flux2_vae)
 
     total = sum(len(v) for v in plan.values())
     done = skipped = 0
@@ -240,6 +241,7 @@ def main() -> int:
     c.add_argument("path")
     c.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     c.add_argument("--vae-path", help="Separate Mage-Flow VAE .safetensors (overrides --model-path)")
+    c.add_argument("--flux2-vae", action="store_true", help="Experimental: encode with FLUX.2 VAE, pack 32c/8x to 128c/16x, and apply vae_bn normalization")
     c.add_argument("--resolution", type=int, nargs="+", default=[1024],
                    help="AREA budget(s), not side lengths. Several values cache every image at "
                         "every tier, which is what dataset.resolutions then trains on.")

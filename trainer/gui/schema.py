@@ -75,6 +75,7 @@ SPEC: dict[str, Spec] = {
     "train.vae_path": _spec("VAE file (optional)",
         "Mage-Flow VAE .safetensors. Used by training and latent caching. Overrides the Diffusers VAE.",
         lambda: F.PathEditor("file")),
+    "train.flux2_vae": _spec("Use FLUX.2 VAE (experimental)", "For full finetuning tests: packs FLUX.2 32-channel /8 latents into Mage-Flow's 128-channel /16 layout and applies vae_bn normalization. Re-cache images; do not reuse Mage-VAE caches.", lambda: F.BoolEditor("Use experimental FLUX.2 VAE"), inline_label=True),
     "train.tokenizer_path": _spec("Tokenizer directory (optional)",
         "Override tokenizer assets. Blank uses the bundled Qwen3-VL tokenizer for a separate encoder file, or the Diffusers text_encoder directory.",
         lambda: F.PathEditor("folder")),
@@ -688,7 +689,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
     ("Training", [
         ("Model / Output", [
             "train.model_path", "train.transformer_path", "train.text_encoder_path",
-            "train.vae_path", "train.tokenizer_path", "train.output_dir", "train.run_name",
+            "train.vae_path", "train.flux2_vae", "train.tokenizer_path", "train.output_dir", "train.run_name",
         ]),
         ("Schedule Length", [
             "train.epochs", "train.max_steps", "train.seed",

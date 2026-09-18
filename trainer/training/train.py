@@ -324,7 +324,7 @@ class Trainer:
         if needs_vae:
             from ..data.cache import LatentCacher
             self.latent_encoder = LatentCacher(
-                self.components.vae, device=self.accelerator.device, dtype=self.dtype
+                self.components.vae, device=self.accelerator.device, dtype=self.dtype, flux2_vae=cfg.train.flux2_vae
             )
             self.components.vae.requires_grad_(False)
 
