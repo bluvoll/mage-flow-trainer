@@ -100,6 +100,8 @@ def cache_launch(
         argv.extend(["--vae-path", vae_path])
     if flux2_vae:
         argv.append("--flux2-vae")
+    if gpus and "," in gpus:
+        argv.extend(["--devices", gpus])
     if upscale:
         argv.append("--upscale")
     if multires_training:

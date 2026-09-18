@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,6 +36,20 @@ def _images(root: Path) -> list[Path]:
 
 
 def cmd_cache(args) -> int:
+    devices = [d.strip() for d in (args.devices or "").split(",") if d.strip()]
+    if len(devices) > 1 and args.num_shards == 1:
+        # One coordinator spawns one independent encoder per selected physical GPU.
+        # Each child gets a disjoint round-robin image shard, so no cache files race.
+        base = list(sys.argv[1:])
+        at = base.index("--devices")
+        del base[at:at + 2]
+        children = []
+        for rank, gpu in enumerate(devices):
+            env = os.environ.copy(); env["CUDA_VISIBLE_DEVICES"] = gpu
+            command = [sys.executable, "-u", "-m", "trainer.tools.cache_latents", *base,
+                       "--shard-index", str(rank), "--num-shards", str(len(devices))]
+            children.append(subprocess.Popen(command, env=env))
+        return 0 if all(child.wait() == 0 for child in children) else 1
     root = Path(args.path)
     if not root.is_dir():
         print(f"not a directory: {root}")
@@ -107,6 +122,11 @@ def cmd_cache(args) -> int:
     if args.dry_run:
         print("\n--dry-run: nothing written")
         return 0
+
+    if args.num_shards > 1:
+        files = files[args.shard_index::args.num_shards]
+        plan = {path: plan[path] for path in files}
+        print(f"\nshard {args.shard_index + 1}/{args.num_shards}: {len(files)} images on {args.device}")
 
     from ..modeling.loader import load_components
 
@@ -276,6 +296,9 @@ def main() -> int:
     c.add_argument("--dry-run", action="store_true",
                    help="report the bucket plan and cache size, write nothing")
     c.add_argument("--device", default="cuda")
+    c.add_argument("--devices", default="", help="Comma-separated physical GPU IDs; launches one cache shard per GPU")
+    c.add_argument("--shard-index", type=int, default=0, help=argparse.SUPPRESS)
+    c.add_argument("--num-shards", type=int, default=1, help=argparse.SUPPRESS)
     c.set_defaults(func=cmd_cache)
 
     a = sub.add_parser("audit", help="check a directory before deleting its images")
