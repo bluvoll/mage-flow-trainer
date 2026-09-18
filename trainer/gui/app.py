@@ -84,6 +84,9 @@ _RULES = {
     "flow.sigmoid_scale": lambda c: c.get("flow.timestep_sample_method") == "logit_normal",
     "flow.dual_timestep_mask_ratio": lambda c: bool(c.get("flow.dual_timestep")),
     "flow.hf_exponent": lambda c: float(c.get("flow.hf_scale") or 0) > 0,
+    **{f"rti.{option}": (lambda c: bool(c.get("rti.enabled"))) for option in (
+        "dense_prefix_blocks", "dense_suffix_blocks", "size_buckets", "start_keep", "target_keep",
+        "identity_steps", "warmup_steps", "anneal_steps", "budget_steps")},
 
     "dataset.resolution": lambda c: not c.get("dataset.resolutions"),
     "dataset.tier_collapse": lambda c: bool(c.get("dataset.resolutions")),

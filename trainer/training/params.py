@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 _COMPONENT_PATTERNS = [
+    ("rti", re.compile(r"^region_interface\.")),
     ("adaln", re.compile(r"^transformer_blocks\.\d+\.(img_mod|txt_mod)\.")),
     (
         "text_attn",
@@ -19,7 +20,7 @@ _COMPONENT_PATTERNS = [
     ("adaln", re.compile(r"^(norm_out|time_text_embed|modulation_down)\.")),
     ("base", re.compile(r"^(img_in|txt_in|txt_norm|proj_out)\.")),
 ]
-COMPONENTS = ("image_attn", "text_attn", "mlp", "adaln", "base")
+COMPONENTS = ("image_attn", "text_attn", "mlp", "adaln", "base", "rti")
 _LORA_TARGETS = {
     "image_attn": ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0"),
     "text_attn": (
@@ -71,6 +72,7 @@ class ComponentLRs:
     mlp: float | None = None
     adaln: float | None = None
     base: float | None = None
+    rti: float | None = None
 
     def resolve(self, component: str, default_lr: float) -> float:
         lr = getattr(self, component)
@@ -142,7 +144,7 @@ def build_param_groups(
         {
             "params": params,
             "lr": lrs.resolve(component, default_lr),
-            "weight_decay": weight_decay,
+            "weight_decay": 0.0 if component == "rti" else weight_decay,
             "component": component,
         }
         for component, params in buckets.items()
@@ -187,7 +189,7 @@ def build_adapter_param_groups(
         {
             "params": params,
             "lr": lrs.resolve(component, default_lr),
-            "weight_decay": weight_decay,
+            "weight_decay": 0.0 if component == "rti" else weight_decay,
             "component": component,
         }
         for component, params in buckets.items()

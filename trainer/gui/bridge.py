@@ -35,6 +35,7 @@ from ..training.config import (
     OptimizerConfig,
     PreserveConfig,
     QuantConfig,
+    RTIConfig,
     ScheduleConfig,
     TrainConfig,
     load_config,
@@ -54,6 +55,7 @@ SECTIONS: dict[str, type] = {
     "preserve": PreserveConfig,
     "quant": QuantConfig,
     "component_lr": ComponentLRs,
+    "rti": RTIConfig,
 }
 
 # Fields that exist on a dataclass but are not config keys in their own section -- they are

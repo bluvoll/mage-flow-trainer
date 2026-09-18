@@ -19,6 +19,7 @@ from .flow import FlowConfig
 from .params import AdapterConfig, ComponentLRs
 from .preserve import PreserveConfig
 from .quant import QuantConfig
+from ..modeling.region_tokens import BudgetSchedule
 from .optimizer_specs import OPTIMIZERS
 
 
@@ -126,6 +127,30 @@ class ScheduleConfig:
             raise ValueError(f"schedule.num_segments must be >= 1, got {self.num_segments}")
         if self.weight_power < 0.0:
             raise ValueError(f"schedule.weight_power must be >= 0, got {self.weight_power}")
+
+
+@dataclass
+class RTIConfig:
+    enabled: bool = False
+    dense_prefix_blocks: int = 2
+    dense_suffix_blocks: int = 2
+    size_buckets: int = 17
+    start_keep: float = .98
+    target_keep: float = .75
+    identity_steps: int = 0
+    warmup_steps: int = 0
+    anneal_steps: int = 1000
+    budget_steps: list[float] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.enabled:
+            return
+        if self.dense_prefix_blocks < 0 or self.dense_suffix_blocks < 1 or self.size_buckets < 1:
+            raise ValueError("RTI requires non-negative prefix, positive suffix, and positive size_buckets")
+        BudgetSchedule(self.start_keep, self.target_keep, self.identity_steps, self.warmup_steps, self.anneal_steps, tuple(self.budget_steps))
+
+    def schedule(self):
+        return BudgetSchedule(self.start_keep, self.target_keep, self.identity_steps, self.warmup_steps, self.anneal_steps, tuple(self.budget_steps))
 
 
 # The converted diffusers repo (see README section 0). `MAGE_FLOW_MODEL` overrides it, so a machine
@@ -258,6 +283,7 @@ class Config:
     adapter: AdapterConfig = field(default_factory=AdapterConfig)
     quant: QuantConfig = field(default_factory=QuantConfig)
     preserve: PreserveConfig = field(default_factory=PreserveConfig)
+    rti: RTIConfig = field(default_factory=RTIConfig)
     # `[[curriculum]]` -- an array of tables, so it is built by hand in `load_config` rather than
     # through `_SECTIONS`. Empty by default; an empty curriculum is exactly today's behaviour.
     curriculum: Curriculum = field(default_factory=Curriculum)
@@ -279,6 +305,7 @@ _SECTIONS = {
     "adapter": AdapterConfig,
     "quant": QuantConfig,
     "preserve": PreserveConfig,
+    "rti": RTIConfig,
 }
 
 
@@ -390,6 +417,17 @@ def load_config(path: str | Path) -> Config:
 
     if cfg.train.pack_resolutions and (cfg.curriculum.phases or cfg.flow.use_ot):
         raise ValueError("pack_resolutions currently requires no curriculum and flow.use_ot=false")
+    if cfg.rti.enabled:
+        if not cfg.train.pack_resolutions:
+            raise ValueError("RTI requires train.pack_resolutions=true")
+        if cfg.flow.dual_timestep:
+            raise ValueError("RTI and flow.dual_timestep cannot be combined")
+        if cfg.preserve.enabled:
+            raise ValueError("RTI and concept preservation cannot be combined")
+        if cfg.is_lora:
+            raise ValueError("RTI currently supports full finetuning only; adapters cannot export its interface")
+        if cfg.train.compile and not cfg.train.compile_dynamic:
+            raise ValueError("RTI compilation requires train.compile_dynamic=true")
     if cfg.adapter.kind == "lycoris_lora" and cfg.preserve.enabled:
         raise ValueError("Concept preservation is not supported with lycoris_lora")
     if cfg.is_lora:

@@ -13,6 +13,20 @@ from .modules.mage_layers import (
 )
 from .batched import _double_stream_block_forward
 from .mageflow_attention import packed_attention_metadata, validate_attention_backend
+from .region_tokens import RegionInterface, build_region_plan
+
+
+def _packed_varlen_metadata(text_lengths, image_lengths, device):
+    """Attention gather/scatter metadata for packed text/image sample pairs."""
+    indices, boundaries = [], [0]
+    text_offset, image_offset = 0, sum(text_lengths)
+    for text_length, image_length in zip(text_lengths, image_lengths):
+        indices.extend(range(text_offset, text_offset + text_length))
+        indices.extend(range(image_offset, image_offset + image_length))
+        boundaries.append(boundaries[-1] + text_length + image_length)
+        text_offset += text_length
+        image_offset += image_length
+    return (torch.tensor(indices, device=device), torch.tensor(boundaries, device=device, dtype=torch.int32), max(t + i for t, i in zip(text_lengths, image_lengths)))
 
 
 @dataclass
@@ -27,6 +41,9 @@ class MageFlowParams:
     checkpoint: bool
     patch_size: int = 1
     modulation_rank: int = 0  # 0 preserves the original checkpoint architecture.
+    rti_size_buckets: int = 0
+    rti_core_start: int = 0
+    rti_core_end: int = 0
 
 
 class MageFlow(nn.Module):
@@ -82,6 +99,14 @@ class MageFlow(nn.Module):
                         ),
                     )
 
+        self.region_interface = None
+        if params.rti_size_buckets:
+            self._validate_rti_span(params.rti_core_start, params.rti_core_end)
+            self.region_interface = RegionInterface(
+                self.inner_dim, params.rti_size_buckets,
+                core_start=params.rti_core_start, core_end=params.rti_core_end,
+            )
+
         self.norm_out = AdaLayerNormContinuous(
             self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6
         )
@@ -91,6 +116,25 @@ class MageFlow(nn.Module):
             bias=True,
         )
         self.configure_execution(params.checkpoint)
+
+    def _validate_rti_span(self, start: int, end: int):
+        if not (0 <= start < end < self.params.depth):
+            raise ValueError(
+                f"RTI core must satisfy 0 <= start < end < depth ({self.params.depth}), got {start}:{end}"
+            )
+
+    def configure_rti(self, dense_prefix_blocks: int = 2, dense_suffix_blocks: int = 2, size_buckets: int = 17):
+        start, end = int(dense_prefix_blocks), self.params.depth - int(dense_suffix_blocks)
+        self._validate_rti_span(start, end)
+        if self.region_interface is not None:
+            if (self.params.rti_size_buckets, self.params.rti_core_start, self.params.rti_core_end) != (size_buckets, start, end):
+                raise ValueError("RTI checkpoint architecture does not match requested RTI settings")
+            return self.region_interface
+        self.params.rti_size_buckets = int(size_buckets)
+        self.params.rti_core_start, self.params.rti_core_end = start, end
+        self.region_interface = RegionInterface(self.inner_dim, size_buckets, core_start=start, core_end=end)
+        self.region_interface.to(device=self.img_in.weight.device, dtype=self.img_in.weight.dtype)
+        return self.region_interface
 
     def configure_execution(
         self,
@@ -157,18 +201,20 @@ class MageFlow(nn.Module):
 
     def forward(
         self, hidden_states, timestep, encoder_hidden_states, return_dict=False,
-        second_timestep=None, timestep_mask=None,
+        second_timestep=None, timestep_mask=None, keep_fraction=1.0,
     ):
         if isinstance(hidden_states, list):
             return (
                 self.forward_packed(hidden_states, timestep, encoder_hidden_states,
-                                    second_timestep, timestep_mask),
+                                    second_timestep, timestep_mask, keep_fraction),
             )
         # The data/loss layer retains a singleton frame axis for image tensors.
         if hidden_states.ndim != 5 or hidden_states.shape[2] != 1:
             raise ValueError("Mage-Flow expects [B,128,1,H/16,W/16] image latents")
         image = hidden_states.squeeze(2)
         b, c, h, w = image.shape
+        if self.region_interface is not None and b != 1:
+            raise ValueError("RTI supports packed native-resolution training; uniform RTI is limited to batch_size=1")
         if c != self.in_channels:
             raise ValueError(
                 f"Expected {self.in_channels} Mage-VAE channels, got {c}; rebuild latent caches"
@@ -180,6 +226,8 @@ class MageFlow(nn.Module):
         if (second_timestep is None) != (timestep_mask is None):
             raise ValueError("Dual conditioning requires both second_timestep and timestep_mask")
         if second_timestep is not None:
+            if self.region_interface is not None:
+                raise ValueError("RTI and dual timestep conditioning cannot be combined")
             if second_timestep.shape != timestep.shape or timestep_mask.shape != (b, h, w):
                 raise ValueError("Dual timestep/mask shape does not match image batch")
             sample_ids = torch.arange(b, device=img.device)[:, None]
@@ -201,7 +249,18 @@ class MageFlow(nn.Module):
         metadata = (
             () if self.attention_backend == "sdpa" else packed_attention_metadata(mask)
         )
+        dense_img = dense_freqs = region_in = plan = None
         for i, block in enumerate(self.transformer_blocks):
+            if self.region_interface is not None and i == self.region_interface.core_start:
+                dense_img, dense_freqs = img, freqs
+                plan = build_region_plan(img[0].detach(), [(h, w)], [h * w], keep_fraction, img.device)
+                img, freqs = self.region_interface.read(img, dense_freqs if not self.compiled_blocks else torch.view_as_complex(dense_freqs), plan)
+                region_in = img
+                if self.compiled_blocks:
+                    freqs = torch.view_as_real(freqs)
+                token_ids = (torch.zeros(plan.counts.numel(), device=img.device, dtype=torch.long), torch.zeros(txt.shape[1], device=img.device, dtype=torch.long))
+                mask = None
+                metadata = (torch.arange(txt.shape[1] + plan.counts.numel(), device=img.device), torch.tensor([0, txt.shape[1] + plan.counts.numel()], device=img.device, dtype=torch.int32), txt.shape[1] + plan.counts.numel())
             args = (
                 block,
                 img,
@@ -219,6 +278,12 @@ class MageFlow(nn.Module):
                 txt, img = checkpoint(self.block_forward, *args, use_reentrant=False)
             else:
                 txt, img = self.block_forward(*args)
+            if self.region_interface is not None and i + 1 == self.region_interface.core_end:
+                img = self.region_interface.write(dense_img, img, region_in, plan)
+                freqs = dense_freqs
+                token_ids = None
+                mask = torch.cat((text_mask.bool(), torch.ones(b, h * w, device=img.device, dtype=torch.bool)), dim=1)[:, None, None, :]
+                metadata = () if self.attention_backend == "sdpa" else packed_attention_metadata(mask)
         scale, shift = self.norm_out.linear(
             self.norm_out.silu(temb).to(img.dtype)
         ).chunk(2, dim=-1)
@@ -231,7 +296,7 @@ class MageFlow(nn.Module):
         )
         return (result,)
 
-    def forward_packed(self, images, timestep, context, second_timestep=None, timestep_mask=None):
+    def forward_packed(self, images, timestep, context, second_timestep=None, timestep_mask=None, keep_fraction=1.0):
         """Pack heterogeneous native resolutions through the entire MMDiT.
 
         Each image retains its own RoPE origin and timestep modulation. Joint
@@ -262,6 +327,8 @@ class MageFlow(nn.Module):
         if (second_timestep is None) != (timestep_mask is None):
             raise ValueError("Dual conditioning requires both second_timestep and timestep_mask")
         if second_timestep is not None:
+            if self.region_interface is not None:
+                raise ValueError("RTI and dual timestep conditioning cannot be combined")
             if second_timestep.shape != timestep.shape or len(timestep_mask) != len(images):
                 raise ValueError("Dual timestep/mask shape does not match packed batch")
             if any(m.shape != (1, *shape) for m, shape in zip(timestep_mask, shapes)):
@@ -299,7 +366,17 @@ class MageFlow(nn.Module):
             torch.tensor(boundaries, device=device, dtype=torch.int32),
             max(a + b for a, b in zip(image_lengths, text_lengths)),
         )
+        dense_img = dense_freqs = region_in = plan = None
         for i, block in enumerate(self.transformer_blocks):
+            if self.region_interface is not None and i == self.region_interface.core_start:
+                dense_img, dense_freqs = img, freqs
+                plan = build_region_plan(img[0].detach(), shapes, image_lengths, keep_fraction, device)
+                raw_freqs = torch.view_as_complex(freqs) if self.compiled_blocks else freqs
+                img, region_freqs = self.region_interface.read(img, raw_freqs, plan)
+                region_in = img
+                freqs = torch.view_as_real(region_freqs) if self.compiled_blocks else region_freqs
+                img_ids = torch.repeat_interleave(torch.arange(len(images), device=device), torch.tensor(plan.region_lengths, device=device))
+                metadata = _packed_varlen_metadata(text_lengths, plan.region_lengths, device)
             args = (
                 block,
                 img,
@@ -317,6 +394,11 @@ class MageFlow(nn.Module):
                 txt, img = checkpoint(self.block_forward, *args, use_reentrant=False)
             else:
                 txt, img = self.block_forward(*args)
+            if self.region_interface is not None and i + 1 == self.region_interface.core_end:
+                img = self.region_interface.write(dense_img, img, region_in, plan)
+                freqs = dense_freqs
+                img_ids = torch.tensor([j for j, n in enumerate(image_lengths) for _ in range(n)], device=device)
+                metadata = _packed_varlen_metadata(text_lengths, image_lengths, device)
         scale, shift = self.norm_out.linear(
             self.norm_out.silu(temb).to(img.dtype)
         ).chunk(2, -1)

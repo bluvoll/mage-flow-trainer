@@ -15,6 +15,7 @@ _ADALN_FIRST_BLOCK = [
 ]
 _MLP_DOWN_ALL = ["*.img_mlp.net.2.weight", "*.txt_mlp.net.2.weight"]
 _HIGH_PRECISION = [
+    "region_interface",
     "time_text_embed",
     "img_in",
     "txt_in",
@@ -139,6 +140,8 @@ def quantize_module(
             cfg,
             extra_skip=cfg.extra_skip + ["modulation_down", "img_mod", "txt_mod"],
         )
+    if getattr(module, "region_interface", None) is not None:
+        cfg = replace(cfg, extra_skip=cfg.extra_skip + ["region_interface"])
     sdnq_cfg = build_sdnq_config(cfg, device, is_training, use_qmm)
 
     module, sdnq_cfg = add_module_skip_keys(module, sdnq_cfg)

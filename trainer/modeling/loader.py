@@ -95,6 +95,12 @@ def load_components(
             if state and all(k.startswith(prefix) for k in state):
                 state = {k[len(prefix):]: v for k, v in state.items()}
                 break
+        has_rti = any(k.startswith("region_interface.") for k in state)
+        if has_rti != bool(params.rti_size_buckets):
+            raise ValueError(
+                "RTI checkpoint metadata and state tensors disagree. Restore the checkpoint's "
+                "model_config (rti_size_buckets, rti_core_start, rti_core_end) before loading."
+            )
         transformer.load_state_dict(state, strict=True, assign=True)
         # RoPE tables are ordinary attributes, so load_state_dict(assign=True) cannot
         # materialize those created inside the meta context.

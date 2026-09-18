@@ -24,6 +24,7 @@ COMPONENT_TOOLTIPS = {
     "mlp": "Both image and text feed-forward networks.",
     "adaln": "Timestep embeddings, modulation and output normalization.",
     "base": "Image/text input projections, text input norm and image output projection.",
+    "rti": "Experimental region read/write interface for full finetuning.",
 }
 
 
@@ -32,6 +33,16 @@ def _spec(label, tooltip, make, inline_label=False):
 
 
 SPEC: dict[str, Spec] = {
+    "rti.enabled": _spec("Enable RTI", "Experimental packed native-resolution region-token finetuning. Requires full finetuning, varlen packing, and dynamic compile.", lambda: F.BoolEditor("Enable experimental RTI"), inline_label=True),
+    "rti.dense_prefix_blocks": _spec("Dense prefix blocks", "Dense blocks before the region read boundary.", lambda: F.IntEditor(0, 256)),
+    "rti.dense_suffix_blocks": _spec("Dense suffix blocks", "Dense blocks after the region write boundary. Must be at least one.", lambda: F.IntEditor(1, 256)),
+    "rti.size_buckets": _spec("Region size buckets", "Fixed log2 size-embedding buckets stored in the checkpoint.", lambda: F.IntEditor(1, 128)),
+    "rti.start_keep": _spec("Initial keep fraction", "Fraction of image tokens retained at the beginning of RTI compression.", lambda: F.FloatEditor(.001, 1.0, 4)),
+    "rti.target_keep": _spec("Target keep fraction", "Fraction retained after annealing.", lambda: F.FloatEditor(.001, 1.0, 4)),
+    "rti.identity_steps": _spec("Identity steps", "Optimizer steps with one region per token; trains WRITE and size embeddings before compression.", lambda: F.IntEditor(0, 10_000_000)),
+    "rti.warmup_steps": _spec("RTI warmup steps", "Optimizer steps held at initial keep fraction before annealing.", lambda: F.IntEditor(0, 10_000_000)),
+    "rti.anneal_steps": _spec("RTI anneal steps", "Cosine anneal duration from initial to target keep fraction.", lambda: F.IntEditor(0, 10_000_000)),
+    "rti.budget_steps": _spec("Discrete keep grid", "Optional comma-separated keep fractions. Each scheduled value snaps to its nearest entry.", lambda: F.FloatListEditor("e.g. 1.0, 0.9, 0.75")),
 
     "train.text_cache_batch_size": _spec(
         "Text cache batch size",
@@ -734,6 +745,11 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
         ]),
         ("High-Frequency Token Loss", [
             "flow.hf_scale", "flow.hf_exponent",
+        ]),
+        ("Experimental RTI", [
+            "rti.enabled", "rti.dense_prefix_blocks", "rti.dense_suffix_blocks", "rti.size_buckets",
+            "rti.start_keep", "rti.target_keep", "rti.identity_steps", "rti.warmup_steps",
+            "rti.anneal_steps", "rti.budget_steps",
         ]),
         ("SDNQ Quantization", [
             "quant.mode", "quant.weights_dtype", "quant.use_quantized_matmul",

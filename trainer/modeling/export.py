@@ -19,6 +19,14 @@ def export_checkpoint(model, dest, stem, cfg, dtype, step, *, runtime=None):
             experimental="true",
             modulation_rank=str(model.params.modulation_rank),
         )
+    if getattr(model, "region_interface", None) is not None:
+        metadata.update(
+            architecture="mageflow-rti-v1", experimental="true", rti="true",
+            rti_metadata_version="1", rti_order="gilbert2d+cuts",
+            rti_core_start=str(model.params.rti_core_start),
+            rti_core_end=str(model.params.rti_core_end),
+            rti_size_buckets=str(model.params.rti_size_buckets),
+        )
     if cfg.is_lora and hasattr(model, "_lycoris_config"):
         from ..training.lycoris import lycoris_state_dict
 

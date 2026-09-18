@@ -338,6 +338,14 @@ class Trainer:
                 raise ValueError(f"hf loss assumes a square patch, got {ph}x{pw}")
             self.hf_patch = ph
 
+        if cfg.rti.enabled:
+            self.rti_interface = self.transformer.configure_rti(
+                cfg.rti.dense_prefix_blocks, cfg.rti.dense_suffix_blocks, cfg.rti.size_buckets)
+            self.rti_budget = cfg.rti.schedule()
+            self.keep_fraction, self.rti_phase = self.rti_budget.resolve(0)
+        else:
+            self.rti_interface = self.rti_budget = None
+            self.keep_fraction, self.rti_phase = 1.0, None
         self._quantize()
 
         if cfg.is_lora:
@@ -641,7 +649,8 @@ class Trainer:
         predictions = self.transformer(hidden_states=[x.to(self.dtype) for x in noisy],
             timestep=torch.cat(times).to(self.dtype), encoder_hidden_states=context,
             **({"second_timestep": torch.cat(second_times).to(self.dtype),
-                "timestep_mask": token_masks} if self.cfg.flow.dual_timestep else {}))[0]
+                "timestep_mask": token_masks} if self.cfg.flow.dual_timestep else {}),
+            **({"keep_fraction": self.keep_fraction} if self.rti_interface is not None else {}))[0]
         # Equal sample weighting: a large image must not gain extra influence merely
         # because it contributes more tokens to the packed attention kernel.
         loss = torch.stack([flow_loss(y,t) for y,t in zip(predictions,targets)]).mean()
@@ -681,6 +690,10 @@ class Trainer:
         self.phase = self.cfg.curriculum.resolve(self.global_step / max(1, self.total_steps))
         if prev is not self.phase and self.accelerator.is_main_process:
             _emit(self, f"phase   {self.phase.label()}  @ step {self.global_step}")
+
+    def _set_rti_budget(self) -> None:
+        if self.rti_budget is not None:
+            self.keep_fraction, self.rti_phase = self.rti_budget.resolve(self.global_step)
 
     def _apply_lr_mul(self) -> None:
         """Scale the scheduler's current LR by the phase multiplier.
@@ -731,6 +744,7 @@ class Trainer:
                 # pure function of the step count, so every DDP rank picks the same phase without
                 # communicating, and a resumed run lands in the right phase on its own.
                 self._set_phase()
+                self._set_rti_budget()
                 with acc.accumulate(self.transformer):
                     loss, hf = self._step(batch)
                     if cfg.optimizer.gradient_release:
@@ -925,6 +939,9 @@ class Trainer:
         flow_bits.append("flux_shift" if f.flux_shift else f"shift {f.shift if f.shift else 'none'}")
         if f.dual_timestep:
             flow_bits.append(f"dual timestep ON (mask={f.dual_timestep_mask_ratio:g}; no teacher)")
+        if cfg.rti.enabled:
+            print(f"rti      keep {self.keep_fraction:.3f}, {cfg.rti.dense_prefix_blocks} dense prefix / "
+                  f"{cfg.rti.dense_suffix_blocks} dense suffix, {cfg.rti.size_buckets} size buckets")
         if f.use_ot:
             # Batch size 1 makes OT a no-op, and the per-bucket map can produce one silently.
             ones = [b for b in self.sampler.bucket_indices
@@ -1038,6 +1055,8 @@ class Trainer:
             effective_batch_size=(cfg.train.batch_size * cfg.train.gradient_accumulation_steps
                                   * acc.num_processes),
         )
+        if self.rti_interface is not None:
+            runtime.update(rti_keep_fraction=self.keep_fraction, rti_phase=self.rti_phase)
         n = export_checkpoint(transformer, dest, stem, cfg, self.dtype, self.global_step,
                               runtime=runtime)
 

@@ -25,6 +25,10 @@ The remaining GUI modules -- `app.py`, `schema.py`, `bridge.py`, `fields.py`,
 `metrics.py` -- are original to this project.
 
 Mage model modules: Microsoft Mage, MIT; see trainer/modeling/modules/LICENSE.Mage.
+Experimental RTI Read/Write design: Eduard Zamfir, MIT (2026); see
+trainer/experimental/LICENSE.RTI and https://github.com/eduardzamfir/RTI.
+RTI's generalized Gilbert traversal: Jakub Červený, BSD-2-Clause; see
+trainer/modeling/LICENSE.gilbert and https://github.com/jakubcerveny/gilbert.
 Batched execution, packed attention and text extraction: diffusion-pipe-mageflow-ft
 commit 40bf63a59269b5cfd73508ff25b5da7357cb1db1, GPL-3.0; see
 trainer/modeling/LICENSE.diffusion-pipe. The combined distribution is GPL-3.0.
