@@ -842,6 +842,7 @@ class TrainingGUI(QtWidgets.QWidget):
         return [Job(cache_launch(
             pth, flat.get("train.model_path") or "", tiers,
             vae_path=flat.get("train.vae_path"),
+            flux2_vae=bool(flat.get("train.flux2_vae")),
             min_bucket_reso=flat.get("dataset.min_bucket_reso") or 256,
             max_bucket_reso=flat.get("dataset.max_bucket_reso") or 1920,
             bucket_reso_steps=flat.get("dataset.bucket_reso_steps") or 64,
@@ -943,6 +944,7 @@ class TrainingGUI(QtWidgets.QWidget):
         self._run_each([cache_launch(
             p, c.get("train.model_path") or "", tiers,
             vae_path=c.get("train.vae_path"),
+            flux2_vae=bool(c.get("train.flux2_vae")),
             min_bucket_reso=c.get("dataset.min_bucket_reso") or 256,
             max_bucket_reso=c.get("dataset.max_bucket_reso") or 1920,
             bucket_reso_steps=c.get("dataset.bucket_reso_steps") or 64,

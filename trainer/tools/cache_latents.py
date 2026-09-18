@@ -109,7 +109,11 @@ def cmd_cache(args) -> int:
 
     from ..modeling.loader import load_components
 
-    print(f"\nloading VAE from {args.vae_path or args.model_path}")
+    # A named FLUX.2 checkpoint is unambiguous. Keep the explicit switch for
+    # generic filenames, but do not let a GUI/CLI wiring omission feed Flux
+    # weights into MageVAE and fail several seconds after planning the cache.
+    args.flux2_vae = bool(args.flux2_vae or "flux2" in Path(args.vae_path or "").name.lower())
+    print(f"\nloading {'FLUX.2' if args.flux2_vae else 'Mage'} VAE from {args.vae_path or args.model_path}")
     components = load_components(
         args.model_path, dtype=torch.bfloat16,
         vae_path=args.vae_path,
