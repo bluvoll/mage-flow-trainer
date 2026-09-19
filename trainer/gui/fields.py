@@ -228,19 +228,45 @@ class BoolEditor(_Blockable):
         self.widget.setChecked(bool(value))
 
 
-class TrainComponentEditor(BoolEditor):
-    """Show an optional component LR as a train/freeze toggle, retaining overrides."""
+class TrainComponentEditor(_Blockable):
+    """Train/freeze toggle with an optional LR override, retained while toggling."""
 
     def __init__(self, label=""):
-        super().__init__(label)
-        self._enabled_value = None
+        container = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.check = QtWidgets.QCheckBox(label)
+        self.lr = QtWidgets.QLineEdit()
+        self.lr.setPlaceholderText("Blank = main optimizer LR")
+        row.addWidget(self.check)
+        row.addWidget(QtWidgets.QLabel("AdaLN LR"))
+        row.addWidget(self.lr, 1)
+        super().__init__(container)
+        self.check.toggled.connect(self._toggle)
+        self.lr.textChanged.connect(self._emit)
+        self.lr.setEnabled(False)
+
+    def _toggle(self, on):
+        self.lr.setEnabled(on)
+        self._emit()
 
     def get(self):
-        return self._enabled_value if self.widget.isChecked() else 0.0
+        if not self.check.isChecked():
+            return 0.0
+        text = self.lr.text().strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            # Preserve invalid input for config validation, rather than silently
+            # substituting the global LR when an override was intended.
+            return text
 
     def _set(self, value):
-        self._enabled_value = value if value != 0 else None
-        self.widget.setChecked(value != 0)
+        self.lr.setText("" if value is None or value == 0 else str(value))
+        self.check.setChecked(value != 0)
+        self.lr.setEnabled(value != 0)
 
 
 class ChoiceEditor(_Blockable):

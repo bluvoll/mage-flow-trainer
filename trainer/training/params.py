@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import dataclass, field
 
 import torch
@@ -73,6 +74,15 @@ class ComponentLRs:
     adaln: float | None = None
     base: float | None = None
     rti: float | None = None
+
+    def __post_init__(self):
+        for component in COMPONENTS:
+            lr = getattr(self, component)
+            if lr is not None and (
+                isinstance(lr, bool) or not isinstance(lr, (int, float))
+                or not math.isfinite(lr) or lr < 0
+            ):
+                raise ValueError(f"component_lr.{component} must be a finite nonnegative number or unset")
 
     def resolve(self, component: str, default_lr: float) -> float:
         lr = getattr(self, component)

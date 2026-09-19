@@ -576,7 +576,8 @@ SPEC: dict[str, Spec] = {
     "component_lr.adaln": _spec(
         "Train AdaLN",
         "Full finetuning only. Enabled by default; disable to freeze AdaLN modulation and timestep projections. "
-        "Uses the global learning rate unless the loaded TOML specifies an AdaLN rate, which is preserved. "
+        "Leave AdaLN LR blank to use the main optimizer LR, or enter a separate rate (e.g. 2e-6). "
+        "Applies to shared and per-block modulation, timestep projections, and final normalization. Zero freezes AdaLN. "
         "Training AdaLN adds gradient and optimizer-state memory. LoRA always freezes AdaLN.",
         lambda: F.TrainComponentEditor("Train AdaLN"), inline_label=True),
 

@@ -271,7 +271,19 @@ The combined trainer is distributed under GPL-3.0 because the adapted diffusion-
 
 See the [10-image LoRA VRAM comparison](kuse-lora-vram.md) for Loaded Text Encoder versus Cached Text Encoder at 1024-area resolution, including INT8 and encoder offloading.
 
-The Method tab has a **Train AdaLN** toggle under **Full Finetuning**, enabled by default and available only in full finetune mode. Disable it to freeze AdaLN (`component_lr.adaln = 0.0`); other components keep their configured training behavior. Enabling it uses the global learning rate, preserving any positive AdaLN override loaded from TOML. LoRA always freezes AdaLN.
+The Method tab has a **Train AdaLN** toggle under **Full Finetuning**, enabled by default and available only in full finetune mode. Its **AdaLN LR** field is enabled while training AdaLN. Leave it blank to inherit the main optimizer LR, or enter an override. Disable the toggle to freeze AdaLN (`component_lr.adaln = 0.0`); toggling it back on restores the value entered in the current GUI session. A saved frozen config stores zero. LoRA always freezes AdaLN.
+
+For example, use one-fifth of the main LR for AdaLN during full finetuning:
+
+```toml
+[optimizer]
+lr = 1e-5
+
+[component_lr]
+adaln = 2e-6
+```
+
+This applies to block modulation, timestep projections, final normalization's parameters, and the shared projection in compressed models. The scheduler preserves the LR ratio through warmup and decay. The setting changes the learning rate, not the selected AdaLN precision or quantization policy.
 
 The GUI omits component targeting, per-component learning-rate inputs, concept-preservation probes, and spectral initialization/cache controls. Their advanced TOML settings are retained when loading existing files and logged when non-default. The maximum bucket side accepts values above 2048; choose it separately from the resolution area budget.
 
