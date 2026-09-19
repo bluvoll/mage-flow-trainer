@@ -183,6 +183,8 @@ class TrainConfig:
     caption_variations: int = 0
     caption_cache_path: str | None = None
     offload_text_encoder: bool = False
+    compile_text_encoder: bool = False
+    text_encoder_embedding_only: bool = False
     max_text_tokens: int = 512
     gradient_checkpointing: bool = True
     dtype: str = "bfloat16"
@@ -241,6 +243,9 @@ class TrainConfig:
             raise ValueError("pack_resolutions requires packed attention and a positive integer batch_size")
         if type(self.text_cache_batch_size) is not int or self.text_cache_batch_size < 1:
             raise ValueError("train.text_cache_batch_size must be a positive integer")
+        for name in ("compile_text_encoder", "text_encoder_embedding_only"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"train.{name} must be a boolean")
         if self.max_text_tokens < 1:
             raise ValueError("max_text_tokens must be positive")
         if self.attention_backend not in ("sdpa", "torch_varlen", "flash_attn_2", "flash_attn_3"):

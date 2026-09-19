@@ -170,7 +170,7 @@ def load_components(
 
 
 @torch.no_grad()
-def encode_prompts(components, prompts, device, max_length=512):
+def encode_prompts(components, prompts, device, max_length=512, *, embedding_only=False):
     tokens = components.tokenizer(
         [PROMPT_TEMPLATE_ENCODE.format(p) for p in prompts],
         padding=True,
@@ -179,6 +179,6 @@ def encode_prompts(components, prompts, device, max_length=512):
         return_tensors="pt",
     )
     ids, mask = tokens.input_ids.to(device), tokens.attention_mask.to(device)
-    hidden = encode_text_hidden(components.text_encoder, ids, mask)
+    hidden = encode_text_hidden(components.text_encoder, ids, mask, embedding_only=embedding_only)
     offset = PROMPT_TEMPLATE_ENCODE_START_IDX
     return hidden[:, offset:].contiguous(), mask[:, offset:].bool().contiguous()

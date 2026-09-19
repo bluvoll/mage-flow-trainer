@@ -40,6 +40,38 @@ The GUI uses the same TOML configuration and training backend as the CLI. Launch
 4. Enable **Cache text embeddings** and set **Caption variations per image** above zero for augmented caching. Choose caption augmentation settings before starting; the trainer prepares missing embeddings automatically.
 5. Select the GPU(s), check batch size and training duration, and click **Start Training**. Multi-GPU training is available on Linux; Windows uses one selected GPU. The GUI displays progress and logs, and **Save / Save As** writes a TOML config you can also run from the CLI.
 
+### Compiled Loaded Text Encoder
+
+Qwen3 compilation is independent of Mage-Flow compilation and quantization.
+To keep Qwen3 in BF16 while using SDNQ for the transformer, merge these
+settings into your existing config:
+
+```toml
+[train]
+dtype = "bfloat16"
+cache_text_embeddings = false
+compile_text_encoder = true
+text_encoder_embedding_only = true
+
+[quant]
+quantize_text_encoder = false
+# Keep your transformer's existing mode and weights_dtype settings.
+```
+
+In the GUI, disable **Cache text embeddings**, enable **Compile Loaded Text
+Encoder** and **Loaded Text Encoder: embedding-only output** under
+**torch.compile**, and disable text encoder quantization under SDNQ. Restart
+an already-open GUI to see the new controls. Both new options default to false
+and apply only to the Loaded Text Encoder; cache generation is unchanged.
+
+Compilation uses dynamic decoder blocks and adds startup overhead. The
+embedding-only path skips unused outputs and verifies equivalence with the
+original wrapper on the first batch; an incompatible Transformers version
+raises an error with instructions to disable that option. SDNQ encoder
+quantization can also be enabled independently when VRAM is tighter.
+See the [batch-size benchmark](docs/text-encoder-large-batch-benchmark.md)
+for measured speed, memory, and numerical differences on RTX 4090.
+
 ### CLI and model paths
 
 Put the native transformer, Qwen3-VL text encoder/tokenizer, and Mage-VAE under `mage-flow/`, or set `train.model_path`. See the [training guide](docs/training-guide.md) for the expected directory layout and full configuration reference.

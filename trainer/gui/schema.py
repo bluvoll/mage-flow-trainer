@@ -53,6 +53,8 @@ SPEC: dict[str, Spec] = {
     "train.caption_cache_path": _spec("Caption cache database", "SQLite path. Empty places caption_variations.sqlite in the dataset folder. Reused across runs; stores embeddings on disk, not all in RAM.", lambda: F.PathEditor("file")),
     "train.cache_text_embeddings": _spec("Cache text embeddings", "Unload Qwen3-VL before training. Set caption variations above zero to persist augmented captions and embeddings in SQLite; zero requires fixed captions.", lambda: F.BoolEditor("Cache text embeddings"), inline_label=True),
     "train.offload_text_encoder": _spec("Offload text encoder", "Move the live encoder to GPU for caption encoding and back to CPU before transformer execution. Trades transfers for lower GPU residency.", lambda: F.BoolEditor("Offload text encoder"), inline_label=True),
+    "train.compile_text_encoder": _spec("Compile Loaded Text Encoder", "Compile Qwen3 decoder blocks with dynamic shapes. Independent of transformer compilation and SDNQ. First encoding includes compilation; disable text encoder quantization for BF16.", lambda: F.BoolEditor("Compile Loaded Text Encoder"), inline_label=True),
+    "train.text_encoder_embedding_only": _spec("Loaded Text Encoder: embedding-only output", "Skip unused logits and intermediate hidden states. Checks equivalence to the original output on the first batch; disabled for Cached Text Encoder.", lambda: F.BoolEditor("Loaded Text Encoder: embedding-only output"), inline_label=True),
     "train.pack_resolutions": _spec("Pack native resolutions", "Mix differently sized images in one batch without image-token padding. Requires varlen attention, integer batch size, no curriculum or OT.", lambda: F.BoolEditor("Pack native resolutions"), inline_label=True),
     "train.checkpoint_blocks": _spec("Checkpoint blocks", "Zero-based block indices; blank checkpoints all blocks.", lambda: F.IntListEditor("e.g. 0, 2, 4")),
     "train.attention_backend": _spec("Attention backend", "torch_varlen uses PyTorch's built-in packed attention. SDPA uses padded attention.", lambda: F.ChoiceEditor(["sdpa", "torch_varlen", "flash_attn_2", "flash_attn_3"])),
@@ -703,6 +705,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
         ]),
         ("torch.compile", [
             "train.compile", "train.compile_dynamic", "train.compile_regional",
+            "train.compile_text_encoder", "train.text_encoder_embedding_only",
         ]),
         ("Checkpoints", [
             "train.save_every_epochs", "train.save_every_steps", "train.keep_last_n",

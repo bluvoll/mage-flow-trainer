@@ -448,6 +448,12 @@ class Trainer:
         if self.text_encoder is not None:
             device = "cpu" if self.cfg.train.offload_text_encoder else self.accelerator.device
             self.text_encoder.to(device).eval()
+            if self.cfg.train.compile_text_encoder:
+                for block in self.text_encoder.model.language_model.layers:
+                    block.compile(dynamic=True)
+                self.accelerator.print("Loaded Text Encoder: compiled decoder blocks (dynamic=True); first encoding includes compile time")
+            if self.cfg.train.text_encoder_embedding_only:
+                self.accelerator.print("Loaded Text Encoder: embedding-only output; first encoding verifies wrapper equivalence")
         self.transformer, self.optimizer, self.scheduler, self.loader = self.accelerator.prepare(
             self.transformer, self.optimizer, self.scheduler, self.loader)
         if self.cfg.optimizer.gradient_release:
@@ -570,7 +576,8 @@ class Trainer:
             self.text_encoder.to(self.accelerator.device)
         try:
             return encode_prompts(self.components, captions, self.accelerator.device,
-                                  self.cfg.train.max_text_tokens)
+                                  self.cfg.train.max_text_tokens,
+                                  embedding_only=self.cfg.train.text_encoder_embedding_only)
         finally:
             if offload:
                 self.text_encoder.to("cpu")

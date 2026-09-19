@@ -116,6 +116,8 @@ _RULES = {
     "schedule.num_segments": lambda c: c.get("schedule.kind") == "rerex",
 
     "train.text_cache_batch_size": lambda c: bool(c.get("train.cache_text_embeddings")),
+    "train.compile_text_encoder": lambda c: not bool(c.get("train.cache_text_embeddings")),
+    "train.text_encoder_embedding_only": lambda c: not bool(c.get("train.cache_text_embeddings")),
     "train.caption_variations": lambda c: bool(c.get("train.cache_text_embeddings")),
     "train.caption_cache_path": lambda c: bool(c.get("train.cache_text_embeddings")) and bool(c.get("train.caption_variations")),
     "adapter.lycoris_algo": lambda c: c.get("adapter.kind") == "lycoris_lora",
