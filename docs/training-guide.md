@@ -240,12 +240,26 @@ are authoritative when resumed state differs from the requested configuration.
 `training_versions` records installed library versions. These fields travel with
 the checkpoint when it is renamed; optimizer tensors are not embedded.
 
+Metadata version 2 also includes `source_checkpoint` on trainer exports: the
+starting transformer weight filename, absolute path, file MD5, byte size, and
+model type (`full_mage_flow`, `compressed`, `compressed_rti`, or
+`full_mage_flow_rti`). Type is detected from the source tensors, before adding
+adapters or RTI. For a Diffusers directory, the checksum covers
+`transformer/diffusion_pytorch_model.safetensors`, not the VAE/text encoder.
+The main process hashes the file once at startup in bounded chunks and reuses
+the record for every save. MD5 identifies matching files; it is not an
+authenticity check. The filename is its name at load time, so a file renamed to
+`base.safetensors` is recorded under that name but remains identifiable by MD5.
+New resume states retain the original source record. Legacy resume states
+without it are explicitly marked as unable to verify the original source.
+
 Read the header without loading model weights:
 
 ```bash
 python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors
 python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors --section config
 python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors --section state
+python -m trainer.tools.inspect_checkpoint path/to/checkpoint.safetensors --section source
 ```
 
 Older checkpoints remain readable but do not gain missing training settings.

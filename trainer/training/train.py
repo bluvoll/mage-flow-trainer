@@ -296,6 +296,12 @@ class Trainer:
 
     def _build_model(self) -> None:
         cfg = self.cfg
+        self.source_checkpoint = None
+        if self.accelerator.is_main_process:
+            from ..modeling.checkpoint_metadata import checkpoint_identity
+            source = cfg.train.transformer_path or Path(cfg.train.model_path) / 'transformer'
+            self.accelerator.print(f"Hashing source transformer: {source}")
+            self.source_checkpoint = checkpoint_identity(source)
         self.text_cache = None
         if cfg.train.cache_text_embeddings:
             # Keep text encoding from consuming the training Torch RNG stream.
@@ -1058,6 +1064,7 @@ class Trainer:
         runtime = optimizer_snapshot(self.optimizer)
         runtime.update(
             save_tag=tag,
+            source_checkpoint=self.source_checkpoint,
             world_size=acc.num_processes,
             effective_batch_size=(cfg.train.batch_size * cfg.train.gradient_accumulation_steps
                                   * acc.num_processes),
@@ -1073,7 +1080,8 @@ class Trainer:
         # inference-only export is one file with nothing to keep in sync alongside it.
         if cfg.train.save_optimizer_state:
             (self.out_dir / f"{stem}-state" / "state.json").write_text(
-                json.dumps({"global_step": self.global_step, "tensors": n}, indent=2)
+                json.dumps({"global_step": self.global_step, "tensors": n,
+                            "source_checkpoint": self.source_checkpoint}, indent=2)
             )
         _emit(self, f"saved {written} ({n} tensors)")
         self._prune_checkpoints()
@@ -1182,7 +1190,15 @@ class Trainer:
             )
         self.accelerator.load_state(str(acc_dir))
 
-        self.global_step = json.loads(state_file.read_text())["global_step"]
+        saved_state = json.loads(state_file.read_text())
+        self.global_step = saved_state["global_step"]
+        if saved_state.get('source_checkpoint') is not None:
+            self.source_checkpoint = saved_state['source_checkpoint']
+        elif self.source_checkpoint is not None:
+            # Old resume states cannot establish the original training source.
+            self.source_checkpoint = dict(self.source_checkpoint,
+                role='initialization_before_legacy_resume',
+                original_training_source_verified=False, resume_from=str(p.resolve()))
         self.start_epoch = self.global_step // max(1, self.steps_per_epoch)
         self.resume_skip_batches = ((self.global_step % max(1, self.steps_per_epoch))
                                     * self.cfg.train.gradient_accumulation_steps)
