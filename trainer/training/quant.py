@@ -135,6 +135,10 @@ def quantize_module(
     from sdnq.training import add_module_skip_keys, apply_sdnq_training_to_module
 
     is_training = cfg.mode == "training"
+    if is_training and cfg.use_stochastic_rounding:
+        from .sdnq_rounding import enable_unbiased_integer_rounding
+
+        enable_unbiased_integer_rounding()
     if getattr(getattr(module, "params", None), "modulation_rank", 0):
         cfg = replace(
             cfg,
@@ -152,7 +156,7 @@ def quantize_module(
 
 
 def dequantize_state_dict(
-    state_dict: dict, dtype: torch.dtype = torch.bfloat16
+    state_dict: dict, dtype: torch.dtype = torch.bfloat16, device=None
 ) -> dict[str, torch.Tensor]:
     """Turn `SDNQTensor` master weights back into plain tensors.
 
@@ -169,7 +173,7 @@ def dequantize_state_dict(
     for key, value in state_dict.items():
         if isinstance(value, SDNQTensor):
             value = value.dequantize(dtype)
-        out[key] = value.detach().to(dtype)
+        out[key] = value.detach().to(device=device, dtype=dtype)
     return out
 
 

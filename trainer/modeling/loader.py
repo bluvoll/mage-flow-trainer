@@ -19,6 +19,12 @@ def model_load_kwargs(train):
             ("transformer_path", "text_encoder_path", "vae_path", "tokenizer_path", "compressed_adaln_dtype", "flux2_vae")}
 
 
+def resolve_model_family(path, model_family="auto"):
+    if model_family not in (None, "auto", "mage_flow"):
+        raise ValueError(f"Unsupported model family: {model_family}; this trainer supports Mage-Flow only")
+    return "mage_flow"
+
+
 def text_sources(path, text_encoder_path=None, tokenizer_path=None):
     encoder = Path(text_encoder_path) if text_encoder_path else Path(path) / "text_encoder"
     tokenizer = Path(tokenizer_path) if tokenizer_path else (

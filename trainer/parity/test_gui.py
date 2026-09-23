@@ -357,21 +357,21 @@ def main() -> int:
     gui._apply(bridge.defaults() | {"adapter.kind": "none"})
     adaln = gui.editors["component_lr.adaln"]
     r.append(check("full finetune enables AdaLN by default",
-                   adaln.widget.isEnabled() and adaln.widget.isChecked()
+                   adaln.widget.isEnabled() and adaln.check.isChecked()
                    and gui.collect()["component_lr.adaln"] is None))
-    adaln.widget.setChecked(False)
+    adaln.check.setChecked(False)
     r.append(check("AdaLN freeze is saved as an explicit zero",
                    "adaln = 0.0" in bridge.dump_toml(gui.collect())))
-    adaln.widget.setChecked(True)
+    adaln.check.setChecked(True)
     r.append(check("re-enabling AdaLN inherits the global LR",
                    gui.collect()["component_lr.adaln"] is None
                    and "adaln =" not in bridge.dump_toml(gui.collect())))
     gui._apply(bridge.defaults() | {"adapter.kind": "none", "component_lr.adaln": 3e-5})
-    adaln.widget.setChecked(False)
-    adaln.widget.setChecked(True)
+    adaln.check.setChecked(False)
+    adaln.check.setChecked(True)
     r.append(check("AdaLN toggle preserves a loaded LR override", adaln.get() == 3e-5))
     gui._apply(bridge.defaults() | {"adapter.kind": "none", "component_lr.adaln": 0.0})
-    r.append(check("loaded AdaLN freeze remains unchecked", not adaln.widget.isChecked()))
+    r.append(check("loaded AdaLN freeze remains unchecked", not adaln.check.isChecked()))
     for kind in ("lora", "lokr", "lycoris_lora"):
         gui.editors["adapter.kind"].widget.setCurrentIndex(gui.editors["adapter.kind"].values.index(kind))
         r.append(check(f"AdaLN toggle disabled for {kind}", not adaln.widget.isEnabled()))

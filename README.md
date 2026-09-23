@@ -12,6 +12,12 @@ Train Mage-Flow adapters or finetune the full transformer through the GUI or CLI
 
 ## SDNQ and consumer hardware
 
+Training-mode INT8/UINT8 uses a compatibility fix for small-update preservation
+with stochastic rounding. See the [rounding diagnosis and validation](docs/sdnq-integer-update-rounding.md)
+before reusing learning rates from older quantized finetunes.
+
+Its 8B transformer has a different memory budget from the Mage-Flow measurements below.
+
 **For full-model finetuning on the 24 GB consumer GPUs targeted here, treat SDNQ as a practical requirement.** Updating 4.116 billion parameters requires space for weights, gradients, optimizer state, and activations. Use SDNQ **training mode**, INT8 weights, and a **Cached Text Encoder**; optimizer-state quantization and CPU offloading may also be necessary. Offloading shifts memory pressure to system RAM, so SDNQ alone does not guarantee that a configuration fits. Our [full-model smoke test](docs/bisque-finetune-smoke.md) used quantized, CPU-offloaded optimizer states.
 
 **LoRA benefits less from SDNQ, but the savings are still welcome.** Only the small adapter is updated, so base-model gradients and optimizer states are already absent. SDNQ **frozen mode** reduces the base weights' VRAM footprint, leaving more room for image resolution or batch size. It is optional for LoRA when the unquantized model fits. Full finetuning without SDNQ remains supported for hardware with sufficient memory.
@@ -121,12 +127,19 @@ Each token is conditioned on its own timestep; text keeps the primary timestep.
 Both draws use your configured timestep distribution, shift and curriculum range.
 The mask ratio must be greater than zero and at most 0.5.
 
-There is no EMA teacher, additional model, or feature-alignment loss. Cached
+This noising toggle alone adds no EMA teacher or feature-alignment loss. Cached
 latents and Cached Text Encoder embeddings remain reusable. It works with
 adapters and finetuning, including native-resolution packing, checkpointing and
 the high-frequency loss. Inference and checkpoint weight layouts are unchanged.
 It defaults to off. Faster convergence on Mage-Flow finetunes is a hypothesis
 to evaluate against ordinary training; individual steps are not guaranteed faster.
+
+For an EMA teacher and feature-alignment loss, enable **Method → Experimental
+Self-Flow** in the GUI. It supports full finetuning with configurable batch size,
+mixed-resolution packing, Cached Text Encoder, cached latents and DDP. Mixed EMA
+stores attention/MLP weights in BF16 with stochastic rounding while keeping AdaLN
+EMA in FP32. Inference checkpoints remain native; full resume state includes the
+teacher and training-only projector. See [Self-Flow setup and constraints](docs/self-flow-training.md).
 
 ## Augmented text cache
 

@@ -5,6 +5,10 @@ using LoKr dimension 10000, alpha 10000, factor 1, with an EMA adapter teacher
 sharing the student's frozen SDNQ base. This is an isolated experimental tool,
 not an option in the production training loop or GUI.
 
+The probe now also supports configured LoCon adapters and full finetuning,
+including BF16 EMA storage with stochastic rounding. See the separate
+[full-finetune experiment](self-flow-finetune-probe.md) for its scope and results.
+
 ## Measured results
 
 | Method | Peak allocated VRAM | Peak reserved VRAM | Median warm step |

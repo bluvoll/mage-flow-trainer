@@ -33,6 +33,13 @@ def _spec(label, tooltip, make, inline_label=False):
 
 
 SPEC: dict[str, Spec] = {
+    'self_flow.enabled': _spec('Enable Self-Flow', 'Experimental full finetuning: configurable batch size, packed cached latents/text, dual timestep; student block 4, teacher block 8. Saves inference checkpoints and EMA resume state.', lambda: F.BoolEditor('Enable experimental Self-Flow'), inline_label=True),
+    'self_flow.ema_dtype': _spec('EMA storage precision', 'BF16 saves memory; FP32 retains small EMA updates directly.', lambda: F.ChoiceEditor(['bfloat16', 'float32'])),
+    'self_flow.ema_device': _spec('EMA storage device', 'CPU streams the teacher and greatly reduces speed in our tests.', lambda: F.ChoiceEditor(['cuda', 'cpu'])),
+    'self_flow.adaln_fp32': _spec('Keep AdaLN EMA in FP32', 'Protects block modulation, timestep embeddings and shared modulation projection.', lambda: F.BoolEditor('FP32 AdaLN EMA'), inline_label=True),
+    'self_flow.stochastic_rounding': _spec('EMA stochastic rounding', 'Preserves small BF16 EMA updates in expectation. Not optimizer Kahan. FP32 EMA ignores this.', lambda: F.BoolEditor('Stochastic rounding for BF16 EMA'), inline_label=True),
+    'self_flow.decay': _spec('EMA decay', 'EMA = decay * teacher + (1-decay) * student after each optimizer update.', lambda: F.FloatEditor(0, .999999, 6)),
+    'self_flow.weight': _spec('Alignment loss weight', 'Weight applied to cosine feature alignment loss.', lambda: F.FloatEditor(0, 100, 4)),
     "rti.enabled": _spec("Enable RTI", "Experimental packed native-resolution region-token finetuning. Requires full finetuning, varlen packing, and dynamic compile.", lambda: F.BoolEditor("Enable experimental RTI"), inline_label=True),
     "rti.dense_prefix_blocks": _spec("Dense prefix blocks", "Dense blocks before the region read boundary.", lambda: F.IntEditor(0, 256)),
     "rti.dense_suffix_blocks": _spec("Dense suffix blocks", "Dense blocks after the region write boundary. Must be at least one.", lambda: F.IntEditor(1, 256)),
@@ -62,7 +69,7 @@ SPEC: dict[str, Spec] = {
     # ------------------------------------------------------------------ train
     "train.model_path": _spec(
         "Model (diffusers dir)",
-        'Local Mage-Flow repository: transformer/, text_encoder/ and vae/.',
+        'Local Mage-Flow repository: transformer/, text_encoder/, tokenizer/ and vae/.',
         lambda: F.PathEditor("folder")),
     "train.output_dir": _spec(
         "Output directory",
@@ -77,7 +84,7 @@ SPEC: dict[str, Spec] = {
     "train.vae_path": _spec("VAE file (optional)",
         "Mage-Flow VAE .safetensors. Used by training and latent caching. Overrides the Diffusers VAE.",
         lambda: F.PathEditor("file")),
-    "train.flux2_vae": _spec("Use FLUX.2 VAE (experimental)", "For full finetuning tests: packs FLUX.2 32-channel /8 latents into Mage-Flow's 128-channel /16 layout and applies vae_bn normalization. Re-cache images; do not reuse Mage-VAE caches.", lambda: F.BoolEditor("Use experimental FLUX.2 VAE"), inline_label=True),
+    "train.flux2_vae": _spec("Use FLUX.2 VAE (experimental)", "Packs FLUX.2 32-channel /8 latents into Mage-Flow's 128-channel /16 layout and applies vae_bn normalization. Supports finetuning and adapters on a base adapted to the selected VAE, including VSF3. Use latent caches made with that same VAE.", lambda: F.BoolEditor("Use experimental FLUX.2 VAE"), inline_label=True),
     "train.tokenizer_path": _spec("Tokenizer directory (optional)",
         "Override tokenizer assets. Blank uses the bundled Qwen3-VL tokenizer for a separate encoder file, or the Diffusers text_encoder directory.",
         lambda: F.PathEditor("folder")),
@@ -590,12 +597,12 @@ SPEC: dict[str, Spec] = {
     "adapter.lycoris_bypass": _spec("LyCORIS bypass", "Compute the adapter separately from the frozen base. Disabled for weight decomposition so magnitude normalization is applied.", lambda: F.BoolEditor("Bypass base weight merging"), inline_label=True),
     "adapter.lycoris_wd_on_output": _spec("Decompose on output", "Normalize weight decomposition along the output dimension (wd_on_out).", lambda: F.BoolEditor("Weight decomposition on output"), inline_label=True),
     "adapter.dtype": _spec("Adapter dtype", "FP32 is the default. BF16 reduces adapter weights, gradients and projection activation memory; validate its training quality separately.", lambda: F.ChoiceEditor(["float32", "bfloat16"])),
-    "adapter.rank": _spec("Rank", "LoRA rank / LoKr dimension.", lambda: F.IntEditor(1, 512)),
+    "adapter.rank": _spec("Rank / dimension", "LoRA rank / LoKr dimension. Large LoKr dimensions such as 10000 are supported; actual factorization depends on layer shapes and factor.", lambda: F.IntEditor(1, 2**31 - 1)),
     "adapter.alpha": _spec(
         "Alpha",
         "peft scales by alpha/r and kohya by alpha/dim, so this transfers unchanged between the "
         "two export formats.",
-        lambda: F.FloatEditor(0.1, 512.0, 1.0, 2)),
+        lambda: F.FloatEditor(0.1, float(2**31 - 1), 1.0, 2)),
     "adapter.dropout": _spec(
         "Dropout", "Applied to the adapter path only.", lambda: F.FloatEditor(0.0, 0.9, 0.05, 2)),
     "adapter.lokr_factor": _spec(
@@ -755,6 +762,10 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
             "rti.enabled", "rti.dense_prefix_blocks", "rti.dense_suffix_blocks", "rti.size_buckets",
             "rti.start_keep", "rti.target_keep", "rti.identity_steps", "rti.warmup_steps",
             "rti.anneal_steps", "rti.budget_steps",
+        ]),
+        ('Experimental Self-Flow', [
+            'self_flow.enabled', 'self_flow.ema_dtype', 'self_flow.ema_device',
+            'self_flow.adaln_fp32', 'self_flow.stochastic_rounding', 'self_flow.decay', 'self_flow.weight',
         ]),
         ("SDNQ Quantization", [
             "quant.mode", "quant.weights_dtype", "quant.use_quantized_matmul",

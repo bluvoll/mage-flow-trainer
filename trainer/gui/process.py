@@ -89,6 +89,7 @@ def cache_launch(
     gpus: str = "",
     vae_path: str | None = None,
     flux2_vae: bool = False,
+    model_family: str = "auto",
 ) -> Launch:
     argv = [_python(), "-u", "-m", "trainer.tools.cache_latents", "cache", dataset_path,
             "--model-path", model_path,
@@ -98,6 +99,8 @@ def cache_launch(
             "--bucket-reso-steps", str(bucket_reso_steps)]
     if vae_path:
         argv.extend(["--vae-path", vae_path])
+    if model_family != "auto":
+        argv.extend(["--model-family", model_family])
     if flux2_vae:
         argv.append("--flux2-vae")
     if gpus and "," in gpus:

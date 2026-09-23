@@ -80,6 +80,8 @@ def detect_gpus() -> list[tuple[int, str]]:
 # Controls that exist but would do nothing in the current combination. Each entry is
 # key -> predicate(flat_config) -> enabled.
 _RULES = {
+    **{f'self_flow.{option}': (lambda c: bool(c.get('self_flow.enabled'))) for option in (
+        'ema_dtype', 'ema_device', 'adaln_fp32', 'stochastic_rounding', 'decay', 'weight')},
     # Measured: under `uniform`, scale 0.5/1.0/2.0 give byte-identical distributions.
     "flow.sigmoid_scale": lambda c: c.get("flow.timestep_sample_method") == "logit_normal",
     "flow.dual_timestep_mask_ratio": lambda c: bool(c.get("flow.dual_timestep")),
@@ -845,6 +847,7 @@ class TrainingGUI(QtWidgets.QWidget):
             pth, flat.get("train.model_path") or "", tiers,
             vae_path=flat.get("train.vae_path"),
             flux2_vae=bool(flat.get("train.flux2_vae")),
+            model_family=flat.get("train.model_family") or "auto",
             min_bucket_reso=flat.get("dataset.min_bucket_reso") or 256,
             max_bucket_reso=flat.get("dataset.max_bucket_reso") or 1920,
             bucket_reso_steps=flat.get("dataset.bucket_reso_steps") or 64,
@@ -947,6 +950,7 @@ class TrainingGUI(QtWidgets.QWidget):
             p, c.get("train.model_path") or "", tiers,
             vae_path=c.get("train.vae_path"),
             flux2_vae=bool(c.get("train.flux2_vae")),
+            model_family=c.get("train.model_family") or "auto",
             min_bucket_reso=c.get("dataset.min_bucket_reso") or 256,
             max_bucket_reso=c.get("dataset.max_bucket_reso") or 1920,
             bucket_reso_steps=c.get("dataset.bucket_reso_steps") or 64,

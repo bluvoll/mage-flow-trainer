@@ -161,6 +161,7 @@ DEFAULT_MODEL_PATH = os.environ.get("MAGE_FLOW_MODEL", "mage-flow")
 
 @dataclass
 class TrainConfig:
+    model_family: str = "auto"  # auto | mage_flow
     model_path: str = DEFAULT_MODEL_PATH
     transformer_path: str | None = None
     text_encoder_path: str | None = None
@@ -237,6 +238,8 @@ class TrainConfig:
     compile_regional: bool = True
 
     def __post_init__(self):
+        if self.model_family not in ("auto", "mage_flow"):
+            raise ValueError("train.model_family must be auto or mage_flow")
         if self.compile is False:
             self.compile = None
         if self.pack_resolutions and (self.attention_backend == "sdpa" or type(self.batch_size) is not int or self.batch_size < 1):
@@ -279,6 +282,23 @@ class TrainConfig:
 
 
 @dataclass
+class SelfFlowConfig:
+    enabled: bool = False
+    ema_dtype: str = 'bfloat16'
+    ema_device: str = 'cuda'
+    adaln_fp32: bool = True
+    stochastic_rounding: bool = True
+    decay: float = .99
+    weight: float = .8
+
+    def __post_init__(self):
+        if self.ema_dtype not in ('float32', 'bfloat16') or self.ema_device not in ('cpu', 'cuda'):
+            raise ValueError('Invalid Self-Flow EMA dtype/device')
+        if not 0 <= self.decay < 1 or not 0 <= self.weight < float('inf'):
+            raise ValueError('Self-Flow needs 0 <= decay < 1 and finite nonnegative weight')
+
+
+@dataclass
 class Config:
     train: TrainConfig = field(default_factory=TrainConfig)
     dataset: DatasetConfig = field(default_factory=lambda: DatasetConfig(path=""))
@@ -290,6 +310,7 @@ class Config:
     quant: QuantConfig = field(default_factory=QuantConfig)
     preserve: PreserveConfig = field(default_factory=PreserveConfig)
     rti: RTIConfig = field(default_factory=RTIConfig)
+    self_flow: SelfFlowConfig = field(default_factory=SelfFlowConfig)
     # `[[curriculum]]` -- an array of tables, so it is built by hand in `load_config` rather than
     # through `_SECTIONS`. Empty by default; an empty curriculum is exactly today's behaviour.
     curriculum: Curriculum = field(default_factory=Curriculum)
@@ -312,6 +333,7 @@ _SECTIONS = {
     "quant": QuantConfig,
     "preserve": PreserveConfig,
     "rti": RTIConfig,
+    "self_flow": SelfFlowConfig,
 }
 
 
@@ -322,6 +344,22 @@ def _build(cls, data: dict, path: str):
     if unknown:
         raise ValueError(f"[{path}] unknown key(s): {unknown}. Valid: {sorted(known)}")
     return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def validate_model_options(cfg):
+    from ..modeling.loader import resolve_model_family
+    cfg.train.model_family = resolve_model_family(cfg.train.model_path, cfg.train.model_family)
+    if cfg.self_flow.enabled:
+        if (cfg.train.model_family != 'mage_flow' or cfg.is_lora
+                or not cfg.train.pack_resolutions or not cfg.flow.dual_timestep
+                or cfg.rti.enabled or cfg.curriculum.phases or cfg.preserve.enabled
+                or cfg.flow.hf_scale or cfg.flow.use_ot or cfg.optimizer.gradient_release
+                or cfg.quant.mode == 'frozen' or cfg.quant.use_quantized_matmul is True
+                or cfg.dataset.source != 'latents' or not cfg.train.cache_text_embeddings):
+            raise ValueError('Experimental Self-Flow requires Mage-Flow full finetuning, '
+                             'packed cached latents, Cached Text Encoder, and dual timestep. '
+                             'RTI, curriculum, preservation, HF loss, OT, gradient release, frozen quantization '
+                             'and quantized matmul are not supported together with it.')
 
 
 def load_config(path: str | Path) -> Config:
@@ -386,6 +424,7 @@ def load_config(path: str | Path) -> Config:
             sections[f.name] = _build(_SECTIONS[f.name], data, f.name)
 
     cfg = Config(**sections)
+    validate_model_options(cfg)
     if not cfg.dataset.path and not cfg.dataset.subsets:
         raise ValueError("dataset.path (or a [[dataset.subsets]] list) is required")
 
@@ -434,8 +473,6 @@ def load_config(path: str | Path) -> Config:
             raise ValueError("RTI currently supports full finetuning only; adapters cannot export its interface")
         if cfg.train.compile and not cfg.train.compile_dynamic:
             raise ValueError("RTI compilation requires train.compile_dynamic=true")
-    if cfg.train.flux2_vae and cfg.is_lora:
-        raise ValueError("train.flux2_vae is an experimental full-finetune path; set adapter.kind='none'.")
     if cfg.adapter.kind == "lycoris_lora" and cfg.preserve.enabled:
         raise ValueError("Concept preservation is not supported with lycoris_lora")
     if cfg.is_lora:

@@ -128,6 +128,8 @@ def _text_cache_batches(items, size):
 
 class Trainer:
     def __init__(self, cfg: Config, config_path: str | Path | None = None):
+        from .config import validate_model_options
+        validate_model_options(cfg)
         require_cuda()
         self.cfg = cfg
         self.config_path = Path(config_path) if config_path else None
@@ -229,6 +231,16 @@ class Trainer:
         self._build_model()
         self._build_optimizer()
         self._prepare()
+        self.self_flow_ema = None
+        if cfg.self_flow.enabled:
+            from .self_flow import AdapterEMA
+            sf = cfg.self_flow
+            self.self_flow_ema = AdapterEMA(self.accelerator.unwrap_model(self.transformer), 8,
+                sf.ema_device, sf.decay, getattr(torch, sf.ema_dtype), sf.stochastic_rounding,
+                full_finetune=True, adaln_fp32=sf.adaln_fp32)
+            self.accelerator.register_for_checkpointing(self.self_flow_ema)
+            self.accelerator.print(f'Self-Flow enabled: block 4 -> 8, EMA {sf.ema_dtype} on {sf.ema_device}, '
+                                  f'FP32 AdaLN={sf.adaln_fp32}, storage {self.self_flow_ema.nbytes / 2**30:.2f} GiB')
 
         self.global_step = 0
         self.start_epoch = 0
@@ -245,7 +257,6 @@ class Trainer:
     def _build_data(self) -> None:
         cfg = self.cfg
         self.dataset = MageFlowDataset(cfg.dataset, caption_seed=cfg.train.seed)
-
         from ..data.packed import NativeResolutionBatchSampler, collate_native
         sampler_cls = NativeResolutionBatchSampler if cfg.train.pack_resolutions else BucketBatchSampler
         self.sampler = sampler_cls(
@@ -380,6 +391,19 @@ class Trainer:
             cfg.train.gradient_checkpointing, cfg.train.checkpoint_blocks,
             cfg.train.compile, cfg.train.compile_dynamic, cfg.train.attention_backend)
         self.groups = groups
+        if cfg.self_flow.enabled:
+            from types import MethodType
+            from .self_flow import distributed_probe_forward
+            if len(self.transformer.transformer_blocks) < 8:
+                raise ValueError('Self-Flow requires at least eight transformer blocks')
+            d = self.transformer.inner_dim
+            self.transformer.self_flow_projector = torch.nn.Sequential(
+                torch.nn.Linear(d, 2*d), torch.nn.SiLU(), torch.nn.Linear(2*d, d)
+            ).to(device=self.accelerator.device, dtype=self.dtype)
+            self.groups.append(dict(params=list(self.transformer.self_flow_projector.parameters()),
+                                    lr=cfg.optimizer.lr, weight_decay=0.0))
+            self.transformer._probe_original_forward = self.transformer.forward
+            self.transformer.forward = MethodType(distributed_probe_forward, self.transformer)
 
         # The reference is "this model with the adapter switched off", which only exists when there
         # is an adapter to switch off. A full finetune has no frozen copy to compare against, and
@@ -455,7 +479,8 @@ class Trainer:
             device = "cpu" if self.cfg.train.offload_text_encoder else self.accelerator.device
             self.text_encoder.to(device).eval()
             if self.cfg.train.compile_text_encoder:
-                for block in self.text_encoder.model.language_model.layers:
+                language_model = self.text_encoder.model.language_model
+                for block in language_model.layers:
                     block.compile(dynamic=True)
                 self.accelerator.print("Loaded Text Encoder: compiled decoder blocks (dynamic=True); first encoding includes compile time")
             if self.cfg.train.text_encoder_embedding_only:
@@ -607,6 +632,8 @@ class Trainer:
         return torch.cat(out).float()
 
     def _step(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if self.self_flow_ema is not None:
+            return self._step_self_flow(batch)
         if self.cfg.train.pack_resolutions:
             return self._step_packed(batch)
         device = self.accelerator.device
@@ -651,6 +678,45 @@ class Trainer:
             self.hf_patch, self.cfg.flow.hf_exponent, mask=mask
         )
         return loss + hf, hf
+
+    def _step_self_flow(self, batch):
+        from .self_flow import forward_probe
+        from .flow import sample_timesteps
+        if batch.get('mask') is not None:
+            raise ValueError('Self-Flow requires unmasked cached latents')
+        latents = [x.to(self.accelerator.device, torch.float32) for x in batch['latents']]
+        context = self._encode(batch['captions'])
+        noises, times, masks, noisy, teacher_images, clean_times = [], [], [], [], [], []
+        for latent in latents:
+            noise = torch.randn_like(latent)
+            t = sample_timesteps(self.cfg.flow, 2, *latent.shape[-2:], latent.device)
+            ids = (torch.rand(latent.shape[-2:], device=latent.device) < self.cfg.flow.dual_timestep_mask_ratio).long()
+            per_token_t = t[ids][None, None, None]
+            noises.append(noise)
+            times.append(t)
+            masks.append(ids)
+            noisy.append(((1-per_token_t)*latent + per_token_t*noise).to(self.dtype))
+            clean_t = t.min().reshape(1)
+            clean_times.append(clean_t)
+            teacher_images.append(((1-clean_t)*latent + clean_t*noise).to(self.dtype))
+        single = len(latents) == 1
+        model = self.accelerator.unwrap_model(self.transformer)
+        model.eval()
+        with torch.no_grad():
+            _, teacher = forward_probe(model, teacher_images[0] if single else teacher_images,
+                                       torch.cat(clean_times), context, stop_at=8, ema=self.self_flow_ema)
+        model.train()
+        prediction, projected = self.transformer(noisy[0] if single else noisy, torch.cat(times), context,
+                                                 token_ids=masks[0] if single else masks,
+                                                 probe=True, project_features=True)
+        if single:
+            prediction, projected, teacher = [prediction], [projected], [teacher]
+        # Equal image weighting for both objectives, not weighting by token count.
+        alignment = torch.stack([1-torch.nn.functional.cosine_similarity(
+            p.float(), t.float(), dim=-1, eps=1e-12).mean() for p,t in zip(projected, teacher)]).mean()
+        fm = torch.stack([flow_loss(p, n-x) for p,n,x in zip(prediction, noises, latents)]).mean()
+        self.last_stats = {'self_flow_alignment': alignment.detach().item()}
+        return fm + self.cfg.self_flow.weight*alignment, None
 
     def _step_packed(self, batch):
         device = self.accelerator.device
@@ -783,6 +849,11 @@ class Trainer:
                 if not acc.sync_gradients:
                     continue
 
+                if self.self_flow_ema is not None and not acc.optimizer_step_was_skipped:
+                    from .distributed import quantized_optimizer_rng
+                    with quantized_optimizer_rng(acc.device, cfg.train.seed + 7919, self.global_step):
+                        self.self_flow_ema.update()
+
                 self.global_step += 1
                 if self.bar is not None:
                     self.bar.update(1)
@@ -849,6 +920,8 @@ class Trainer:
         )
         # total = mse + hf, so the two printed numbers add up to the first.
         parts = f"loss {value:.4f}"
+        if 'self_flow_alignment' in getattr(self, 'last_stats', {}):
+            parts += f"  sf {self.last_stats['self_flow_alignment']:.4f}"
         if hf_value is not None:
             parts += f" (mse {value - hf_value:.4f} + hf {hf_value:.4f})"
         # Fraction of rows optimal transport actually reordered. 0.00 means it is doing nothing --
@@ -951,7 +1024,8 @@ class Trainer:
             flow_bits.append(f"sigmoid_scale {f.sigmoid_scale}")
         flow_bits.append("flux_shift" if f.flux_shift else f"shift {f.shift if f.shift else 'none'}")
         if f.dual_timestep:
-            flow_bits.append(f"dual timestep ON (mask={f.dual_timestep_mask_ratio:g}; no teacher)")
+            teacher_label = 'Self-Flow EMA teacher' if cfg.self_flow.enabled else 'no teacher'
+            flow_bits.append(f"dual timestep ON (mask={f.dual_timestep_mask_ratio:g}; {teacher_label})")
         if cfg.rti.enabled:
             print(f"rti      keep {self.keep_fraction:.3f}, {cfg.rti.dense_prefix_blocks} dense prefix / "
                   f"{cfg.rti.dense_suffix_blocks} dense suffix, {cfg.rti.size_buckets} size buckets")
@@ -1160,7 +1234,9 @@ class Trainer:
         """
         stem = self.cfg.train.run_name if tag == "final" else f"{self.cfg.train.run_name}-{tag}"
         dest = self.out_dir / f"{stem}-state" / "accelerator"
-        self.accelerator.save_state(str(dest))
+        # SDNQTensor is a wrapper without ordinary tensor storage. Native
+        # torch serialization preserves its quantized payload and metadata.
+        self.accelerator.save_state(str(dest), safe_serialization=self.cfg.quant.mode != 'training')
 
     def _resume(self, path: str) -> None:
         p = Path(path)
@@ -1188,7 +1264,10 @@ class Trainer:
                 f"{p} has no saved optimizer state (expected {acc_dir}). It was written with "
                 f"save_full_state disabled, so it can be used for inference but not resumed."
             )
-        self.accelerator.load_state(str(acc_dir))
+        from sdnq.training import SDNQTensor
+        from sdnq.dequantizer import SDNQDequantizer
+        with torch.serialization.safe_globals([SDNQTensor, SDNQDequantizer]):
+            self.accelerator.load_state(str(acc_dir))
 
         saved_state = json.loads(state_file.read_text())
         self.global_step = saved_state["global_step"]

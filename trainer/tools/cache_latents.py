@@ -35,6 +35,48 @@ def _images(root: Path) -> list[Path]:
     )
 
 
+def config_cache_commands(args):
+    """Use the config's exact subset paths and bucket/VAE settings."""
+    from ..training.config import load_config
+    cfg = load_config(args.config)
+    commands = []
+    for subset in cfg.dataset.effective_subsets():
+        command = [sys.executable, "-u", "-m", "trainer.tools.cache_latents", "cache", subset.path,
+                   "--model-path", cfg.train.model_path, "--model-family", cfg.train.model_family,
+                   "--resolution", *map(str, args.resolution or cfg.dataset.tiers),
+                   "--min-bucket-reso", str(cfg.dataset.min_bucket_reso),
+                   "--max-bucket-reso", str(cfg.dataset.max_bucket_reso),
+                   "--bucket-reso-steps", str(cfg.dataset.bucket_reso_steps),
+                   "--batch-size", str(args.batch_size)]
+        if cfg.train.vae_path:
+            command += ["--vae-path", cfg.train.vae_path]
+        if cfg.train.flux2_vae:
+            command.append("--flux2-vae")
+        if not cfg.dataset.bucket_no_upscale:
+            command.append("--upscale")
+        if cfg.dataset.multires_training:
+            command.append("--multires")
+        if args.devices:
+            command += ["--devices", args.devices]
+        for flag in ("overwrite", "dry_run", "allow_missing_captions"):
+            if getattr(args, flag):
+                command.append("--" + flag.replace("_", "-"))
+        commands.append(command)
+    return commands
+
+
+def cmd_cache_config(args):
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1")
+    commands = config_cache_commands(args)
+    for i, command in enumerate(commands, 1):
+        print(f"\nCaching subset {i}/{len(commands)}: {command[5]}", flush=True)
+        result = subprocess.run(command)
+        if result.returncode:
+            return result.returncode
+    return 0
+
+
 def cmd_cache(args) -> int:
     if args.batch_size < 1:
         raise ValueError("--batch-size must be at least 1")
@@ -51,7 +93,8 @@ def cmd_cache(args) -> int:
             command = [sys.executable, "-u", "-m", "trainer.tools.cache_latents", *base,
                        "--shard-index", str(rank), "--num-shards", str(len(devices))]
             children.append(subprocess.Popen(command, env=env))
-        return 0 if all(child.wait() == 0 for child in children) else 1
+        statuses = [child.wait() for child in children]
+        return 0 if all(status == 0 for status in statuses) else 1
     root = Path(args.path)
     if not root.is_dir():
         print(f"not a directory: {root}")
@@ -141,7 +184,7 @@ def cmd_cache(args) -> int:
     # compiled for ComfyUI's Python, not this trainer's virtualenv. Re-exec
     # only that cache operation there; training subsequently reads ordinary
     # safetensor latents and remains in this environment.
-    if args.flux2_vae and args.vae_path:
+    if args.flux2_vae and args.vae_path and Path(args.vae_path).is_file():
         from safetensors import safe_open
         with safe_open(str(args.vae_path), framework="pt") as handle:
             legacy_comfy_flux2 = "bn.running_mean" in handle.keys() and "encoder.quant_conv.weight" in handle.keys()
@@ -151,7 +194,8 @@ def cmd_cache(args) -> int:
                 raise RuntimeError("This legacy ComfyUI FLUX.2 VAE needs /home/bluvoll/ComfyUI/venv/bin/python for caching.")
             print("restarting cache under ComfyUI's Python for the legacy FLUX.2 VAE", flush=True)
             os.execv(str(comfy_python), [str(comfy_python), *sys.argv])
-    print(f"\nloading {'FLUX.2' if args.flux2_vae else 'Mage'} VAE from {args.vae_path or args.model_path}")
+    vae_label = "FLUX.2" if args.flux2_vae else "Mage"
+    print(f"\nloading {vae_label} VAE from {args.vae_path or args.model_path}")
     components = load_components(
         args.model_path, dtype=torch.bfloat16,
         vae_path=args.vae_path,
@@ -284,9 +328,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Mage-Flow latent cache tools")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    cc = sub.add_parser("cache-config", help="cache every dataset subset from a training TOML")
+    cc.add_argument("config")
+    cc.add_argument("--resolution", type=int, nargs="+", help="Override config resolution tiers")
+    cc.add_argument("--batch-size", type=int, default=1)
+    cc.add_argument("--devices", default="", help="Physical GPU IDs, e.g. 0,1; batch size is per GPU")
+    cc.add_argument("--overwrite", action="store_true")
+    cc.add_argument("--dry-run", action="store_true")
+    cc.add_argument("--allow-missing-captions", action="store_true")
+    cc.set_defaults(func=cmd_cache_config)
+
     c = sub.add_parser("cache", help="encode images to cached latents")
     c.add_argument("path")
     c.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
+    c.add_argument("--model-family", choices=["auto", "mage_flow"], default="auto")
     c.add_argument("--vae-path", help="Separate Mage-Flow VAE .safetensors (overrides --model-path)")
     c.add_argument("--flux2-vae", action="store_true", help="Experimental: encode with FLUX.2 VAE, pack 32c/8x to 128c/16x, and apply vae_bn normalization")
     c.add_argument("--resolution", type=int, nargs="+", default=[1024],

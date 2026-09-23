@@ -9,11 +9,13 @@ from safetensors.torch import save_file
 
 def export_checkpoint(model, dest, stem, cfg, dtype, step, *, runtime=None):
     dest = Path(dest)
-    metadata = {"step": str(step), "run": cfg.train.run_name, "model": "mage_flow"}
+    family = getattr(model, "model_family", "mage_flow")
+    modulation_rank = getattr(getattr(model, "params", None), "modulation_rank", 0)
+    metadata = {"step": str(step), "run": cfg.train.run_name, "model": family}
     from .checkpoint_metadata import training_metadata
 
     metadata.update(training_metadata(cfg, step, dtype, runtime))
-    if model.params.modulation_rank:
+    if modulation_rank:
         metadata.update(
             architecture="mageflow-lowrank-modulation-v1",
             experimental="true",
@@ -64,18 +66,20 @@ def export_checkpoint(model, dest, stem, cfg, dtype, step, *, runtime=None):
         (dest / f"{stem}.json").write_text(metadata["adapter_config"])
         out = dest / f"{stem}.safetensors"
     else:
-        state = model.state_dict()
+        # The Self-Flow feature projector is training-only. Accelerate's full
+        # resume state saves it, but inference checkpoints must remain native.
+        state = {k: v for k, v in model.state_dict().items() if not k.startswith('self_flow_projector.')}
         from .compressed_modulation import compressed_parameter
 
         keep_fp32 = {
             k: v.detach().to("cpu", torch.float32).contiguous()
             for k, v in state.items()
-            if model.params.modulation_rank and compressed_parameter(k)
+            if modulation_rank and compressed_parameter(k)
         }
         if cfg.quant.mode == "training":
             from ..training.quant import dequantize_state_dict
 
-            state = dequantize_state_dict(state, dtype)
+            state = dequantize_state_dict(state, dtype, device="cpu")
         state = {k: v.detach().to("cpu", dtype).contiguous() for k, v in state.items()}
         state.update(keep_fp32)
         config = asdict(model.params)
