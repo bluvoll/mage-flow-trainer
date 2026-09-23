@@ -400,11 +400,19 @@ SPEC: dict[str, Spec] = {
         lambda: F.IntEditor(0, 20)),
     "dataset.caption.tag_dropout_percent": _spec(
         "Tag dropout",
-        "Fraction of tags dropped per sample. The floor below is respected exactly, even at 100%.",
+        "Legacy per-tag dropout: each sample drops a rounded fraction of flexible tags. Ignored when Min/Max tags are enabled.",
         lambda: F.FloatEditor(0.0, 1.0, 0.05, 2)),
     "dataset.caption.min_tags_kept": _spec(
-        "Min tags kept", "Dropout never takes a caption below this many tags.",
+        "Min tags kept", "Legacy dropout floor. Ignored when Min/Max tags are enabled.",
         lambda: F.IntEditor(0, 50)),
+    "dataset.caption.tag_min_count": _spec(
+        "Min tags",
+        "Alternative tag sampling mode. Each caption keeps a random number of flexible tags from Min..Max (inclusive). Protected tags and pinned first tags are always kept and do not count toward this number.",
+        lambda: F.IntEditor(0, 100)),
+    "dataset.caption.tag_max_count": _spec(
+        "Max tags",
+        "Alternative tag sampling mode. Each caption keeps a random number of flexible tags from Min..Max (inclusive). When enabled, Tag dropout and Min tags kept are ignored. Set both Min and Max to 0 to disable.",
+        lambda: F.IntEditor(0, 100)),
     "dataset.caption.protected_tags": _spec(
         "Protected tags",
         "Never dropped, never shuffled out of position. Comma separated. Verified 3000/3000.",
@@ -553,7 +561,9 @@ SPEC: dict[str, Spec] = {
         "segment i ends exactly where i+1 begins.",
         lambda: F.ChoiceEditor(["constant", "cosine", "linear", "rex", "rerex"])),
     "schedule.warmup_steps": _spec(
-        "Warmup steps", "Linear ramp from 0 to the peak LR.", lambda: F.IntEditor(0, 100_000)),
+        "Warmup steps / fraction",
+        "Linear ramp from 0 to peak LR. Values from 0 to <1 are fractions of the complete training run: 0.1 = 10%, 0.05 = 5%. Values >= 1 are absolute optimizer-step counts.",
+        lambda: F.FloatEditor(0.0, 100_000.0, 10.0, 3)),
     "schedule.min_lr_ratio": _spec(
         "Min LR ratio",
         "Floor for every decaying schedule, as a fraction of peak. 0.001 reproduces sd-scripts; "
@@ -692,6 +702,7 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
         ("Caption Augmentation", [
             "dataset.caption.shuffle_tags", "dataset.caption.shuffle_keep_first_n",
             "dataset.caption.tag_dropout_percent", "dataset.caption.min_tags_kept",
+            "dataset.caption.tag_min_count", "dataset.caption.tag_max_count",
             "dataset.caption.caption_dropout_percent", "dataset.caption.protected_tags",
             "dataset.caption.nl_shuffle_sentences", "dataset.caption.nl_keep_first_sentence",
         ]),

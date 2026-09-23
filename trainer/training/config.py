@@ -98,7 +98,8 @@ class OptimizerConfig:
 @dataclass
 class ScheduleConfig:
     kind: str = "constant"              # "constant" | "cosine" | "linear" | "rex" | "rerex"
-    warmup_steps: int = 0
+    # Integer values are absolute optimizer steps; values in (0, 1) are a fraction of the run.
+    warmup_steps: float = 0.0
     # Floor for every decaying schedule, as a fraction of the group's peak LR. sd-scripts hardcodes
     # 0.001 for REX/ReREX; leaving this at 0.0 makes them decay all the way to zero instead.
     min_lr_ratio: float = 0.0
