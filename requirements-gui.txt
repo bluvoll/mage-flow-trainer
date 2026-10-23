@@ -1,0 +1,10 @@
+# GUI-only install: the laptop side of remote training (docs/remote-training.md). The GPU box does the caching
+# and training, so this has no CUDA, diffusers, SDNQ or accelerate. The GUI still imports the trainer's config
+# and dataset classes, which import torch, so torch is here as the CPU build (the installer adds its index).
+# Same versions as requirements.txt / uv.lock.
+torch==2.10.0
+numpy==2.4.6
+pillow==12.3.0
+pyside6==6.11.1
+safetensors==0.8.0
+toml==0.10.2

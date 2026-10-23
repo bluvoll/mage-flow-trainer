@@ -3,12 +3,16 @@
 #
 #   ./install.sh              install into ./venv, write ./start-gui.sh and ./start-converter.sh
 #   ./install.sh --recreate   delete an existing ./venv first
+#   ./install.sh --gui-only   only the GUI, for a laptop that trains on a remote GPU box (CPU torch)
 #
 # Creates `venv/` (not `.venv/`) deliberately: the repo's own development environment is `.venv`,
 # managed by uv against uv.lock, and an installed copy must not silently take it over.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+# Some pod images (Lium's PyTorch template) pin their own torch for every pip through PIP_CONSTRAINT; the
+# trainer's venv has its own pins, which that constraint would contradict.
+unset PIP_CONSTRAINT
 
 VENV="venv"
 # The diffusers commit this trainer was verified against. SDNQ integration is pinned to this revision, so
@@ -25,6 +29,7 @@ die()  { printf '%sxxx%s %s\n' "$RED" "$OFF" "$*" >&2; exit 1; }
 for arg in "$@"; do
     case "$arg" in
         --recreate) RECREATE=1 ;;
+        --gui-only) GUI_ONLY=1 ;;
         -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
         *) die "unknown option: $arg (try --help)" ;;
     esac
@@ -36,13 +41,31 @@ done
 # so they are fallbacks rather than peers. Preference order is the order of this list.
 usable() {
     "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12),(3,13)) else 1)' \
-        >/dev/null 2>&1
+        >/dev/null 2>&1 || return 1
+    # Debian/Ubuntu split venv's pip bootstrap into python3.X-venv; without it `-m venv` fails halfway and
+    # leaves a venv with no pip (common on JupyterHub images, where there is no sudo to install it). Skip
+    # such an interpreter and keep looking: a conda/pyenv Python further down the list usually has it.
+    if ! "$1" -c 'import ensurepip, venv' >/dev/null 2>&1; then
+        warn "$(command -v "$1" || echo "$1"): cannot create virtual environments (no ensurepip), skipped"
+        return 1
+    fi
 }
 
 PYTHON=""
+# INSTALL_PYTHON=/path/to/python ./install.sh picks the interpreter explicitly.
+if [ -n "${INSTALL_PYTHON:-}" ]; then
+    usable "$INSTALL_PYTHON" || die "INSTALL_PYTHON=$INSTALL_PYTHON is not a usable Python 3.11-3.13 with venv support"
+    PYTHON="$INSTALL_PYTHON"
+fi
 for candidate in python3.11 python3.12 python3.13 python3 python; do
+    [ -z "$PYTHON" ] || break
     command -v "$candidate" >/dev/null 2>&1 || continue
     if usable "$candidate"; then PYTHON="$(command -v "$candidate")"; break; fi
+done
+# Conda installs (JupyterHub images, Colab-like boxes) are not always first on PATH for a shell.
+for candidate in "${CONDA_PREFIX:-}/bin/python3" /opt/conda/bin/python3; do
+    [ -z "$PYTHON" ] || break
+    [ -x "$candidate" ] && usable "$candidate" && PYTHON="$candidate"
 done
 
 # pyenv keeps its interpreters off PATH unless selected, so a machine with 3.11 installed can look
@@ -59,7 +82,8 @@ fi
 if [ -z "$PYTHON" ]; then
     echo
     die "no Python 3.11, 3.12 or 3.13 found.
-     Install one and re-run:
+     (an installed one without ensurepip/venv support does not count; see the warnings above)
+     Install one and re-run, or point at one: INSTALL_PYTHON=/path/to/python3 ./install.sh
        Fedora/RHEL    sudo dnf install python3.11
        Debian/Ubuntu  sudo apt install python3.11 python3.11-venv
        Arch           sudo pacman -S python311      (AUR)
@@ -79,6 +103,11 @@ if [ -d "$VENV" ] && [ "${RECREATE:-0}" = "1" ]; then
     say "removing existing $VENV/"
     rm -rf "$VENV"
 fi
+# A venv left half-made by an interpreter without ensurepip has a python but no pip: start it over.
+if [ -d "$VENV" ] && ! "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+    warn "existing $VENV/ is incomplete (no working pip); creating it again"
+    rm -rf "$VENV"
+fi
 if [ -d "$VENV" ]; then
     say "reusing existing $VENV/  ${DIM}(--recreate to start clean)${OFF}"
 else
@@ -90,7 +119,15 @@ VPY="$PWD/$VENV/bin/python"
 [ -x "$VPY" ] || die "venv looks broken: no $VPY"
 
 # ---------------------------------------------------------------- dependencies
-if command -v uv >/dev/null 2>&1; then
+if [[ "${GUI_ONLY:-0}" == 1 ]]; then
+    # The laptop side of remote training: the GUI, the remote client and the config classes it validates
+    # against. CPU torch from PyTorch's CPU index; everything else pinned like requirements.txt.
+    say "GUI-only install ${DIM}(for remote training: CPU PyTorch, no CUDA, diffusers or SDNQ)${OFF}"
+    "$VPY" -m pip install --upgrade pip >/dev/null
+    "$VPY" -m pip install -r requirements-gui.txt --extra-index-url https://download.pytorch.org/whl/cpu \
+        || die "pip install failed"
+    "$VPY" -m pip install --no-deps -e . || die "could not install the trainer package"
+elif command -v uv >/dev/null 2>&1; then
     # uv honours uv.lock, so this reproduces the exact resolved set including the git diffusers and
     # the cu128 torch index. UV_PROJECT_ENVIRONMENT points it at venv/ instead of its default .venv.
     say "installing with uv ${DIM}(from uv.lock)${OFF}"
@@ -158,6 +195,11 @@ write_launcher start-gui.sh       trainer.gui                 "Start the Mage-Fl
 # ---------------------------------------------------------------- report
 echo
 say "checking the install"
+if [[ "${GUI_ONLY:-0}" == 1 ]]; then
+    "$VPY" -c "import trainer.gui.app" || die "the GUI does not import -- see the error above"
+    say "done.  Start the GUI with:  ./start-gui.sh, then paste the GPU box's link into the Remote bar."
+    exit 0
+fi
 "$VPY" trainer/tools/check_install.py --require-gui
 "$VPY" -m trainer.tools.update_dependencies --record
 

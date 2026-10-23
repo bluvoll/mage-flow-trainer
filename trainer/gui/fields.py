@@ -476,23 +476,24 @@ class BucketMapEditor(_Blockable):
 class WeightsEditor(_Blockable):
     """`caption.mixed_weights` -- relative, not percentages, so no normalisation is imposed."""
 
-    def __init__(self, keys):
+    def __init__(self, keys, per_row=4):
         container = QtWidgets.QWidget()
-        row = QtWidgets.QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        grid = QtWidgets.QGridLayout(container)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
         self.spins = {}
         super().__init__(container)
-        for k in keys:
-            row.addWidget(make_label(k, bold=False))
+        for i, k in enumerate(keys):
+            row, col = divmod(i, per_row)
+            grid.addWidget(make_label(k, bold=False), row, col * 2)
             spin = NoScrollSpinBox()
             spin.setLocale(QtCore.QLocale.c())
             spin.setRange(0, 1000)
             spin.setMinimumWidth(78)
             spin.valueChanged.connect(self._emit)
-            row.addWidget(spin)
+            grid.addWidget(spin, row, col * 2 + 1)
             self.spins[k] = spin
-        row.addStretch(1)
+        grid.setColumnStretch(per_row * 2, 1)
 
     def get(self):
         return {k: int(s.value()) for k, s in self.spins.items()}
@@ -771,9 +772,12 @@ class SubsetEditor(_Blockable):
     The two are mutually exclusive in the loader, so `prune_defaults` drops `dataset.path` as soon
     as a row exists -- the GUI writes the file, so it resolves the conflict rather than handing
     back an error about a key the user cannot see.
+
+    The fourth column is the subset's painted loss-mask folder (`mask_path`); empty leaves that
+    folder unmasked. It is last so the first three keep their indexes.
     """
 
-    _HEADERS = ("Folder", "Repeats", "Texture crops")
+    _HEADERS = ("Folder", "Repeats", "Texture crops", "Masks")
 
     def __init__(self):
         w = QtWidgets.QWidget()
@@ -799,6 +803,7 @@ class SubsetEditor(_Blockable):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        head.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
         for i in (1, 2):
             head.setSectionResizeMode(i, QtWidgets.QHeaderView.ResizeMode.Fixed)
         head.resizeSection(1, 110)
@@ -824,7 +829,8 @@ class SubsetEditor(_Blockable):
         self.clear_btn.clicked.connect(self._clear)
         self.table.itemSelectionChanged.connect(self._update_remove_button)
 
-    def _make_row(self, path, num_repeats, texture, index):
+    @staticmethod
+    def _folder_cell(path):
         # A plain QLineEdit + button rather than a nested PathEditor. PathEditor is a QObject
         # wrapper around its widget; putting only the widget in a table cell leaves the wrapper
         # unreferenced, Python collects it, and Qt then owns a half-destroyed object -- which
@@ -847,6 +853,16 @@ class SubsetEditor(_Blockable):
             if chosen:
                 line.setText(chosen)
         browse.clicked.connect(_pick)
+        return holder_path, line, browse
+
+    def _make_row(self, path, num_repeats, texture, index, mask_path=""):
+        holder_path, line, browse = self._folder_cell(path)
+        holder_mask, mask_line, _ = self._folder_cell(mask_path)
+        mask_line.setPlaceholderText("unmasked")
+        mask_line.setToolTip(
+            "Optional folder of grayscale loss masks for this folder's images, matched by filename "
+            "stem. White = learn, black = weight dataset.mask_outside_weight. Empty = unmasked."
+        )
 
         reps = NoScrollSpinBox()
         reps.setLocale(QtCore.QLocale.c())
@@ -872,13 +888,15 @@ class SubsetEditor(_Blockable):
         self.table.setCellWidget(index, 0, holder_path)
         self.table.setCellWidget(index, 1, reps)
         self.table.setCellWidget(index, 2, holder)
+        self.table.setCellWidget(index, 3, holder_mask)
         self.table.setRowHeight(index, max(40, line.sizeHint().height() + 8,
                                            reps.sizeHint().height() + 8,
                                            browse.sizeHint().height() + 8))
         line.textChanged.connect(self._emit)
+        mask_line.textChanged.connect(self._emit)
         reps.valueChanged.connect(self._emit)
         tex.toggled.connect(self._emit)
-        return line, reps, tex
+        return line, reps, tex, mask_line
 
     def _add_row(self):
         i = self.table.rowCount()
@@ -919,6 +937,9 @@ class SubsetEditor(_Blockable):
             row["num_repeats"] = int(reps.value())
         if not tex.isChecked():
             row["texture"] = False
+        masks = self.table.cellWidget(i, 3).findChild(QtWidgets.QLineEdit).text().strip()
+        if masks:
+            row["mask_path"] = masks
         return row
 
     def get(self):
@@ -932,4 +953,251 @@ class SubsetEditor(_Blockable):
             i = self.table.rowCount()
             self.table.insertRow(i)
             self._make_row(sub.get("path", ""), sub.get("num_repeats", 1),
-                           sub.get("texture", True), i)
+                           sub.get("texture", True), i, sub.get("mask_path") or "")
+
+
+class LineListEditor(_Blockable):
+    """One entry per line, nothing split on commas.
+
+    For `attribution_patterns`: these are regexes, and `{1,3}` or `(a|b), c` would be cut apart by
+    the comma-splitting `StrListEditor`.
+    """
+
+    def __init__(self, placeholder="one per line", height=60):
+        w = QtWidgets.QPlainTextEdit()
+        w.setPlaceholderText(placeholder)
+        w.setFixedHeight(height)
+        super().__init__(w)
+        w.textChanged.connect(self._emit)
+
+    def get(self):
+        return [line.strip() for line in self.widget.toPlainText().splitlines() if line.strip()]
+
+    def _set(self, value):
+        if isinstance(value, str):
+            value = [value]
+        self.widget.setPlainText("\n".join(value or []))
+
+
+def _toml_inline(table: dict) -> str:
+    """`{ prompt = "...", seed = 7 }`. Strings go through json.dumps, whose escapes are a subset
+    of TOML basic-string escapes, so the line parses back to the same value."""
+    import json
+
+    def value(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return repr(v)
+        return json.dumps(str(v), ensure_ascii=False)
+
+    return "{ " + ", ".join(f"{k} = {value(v)}" for k, v in table.items()) + " }"
+
+
+class PromptListEditor(_Blockable):
+    """`sampling.prompts`: one prompt per line.
+
+    A line may instead be an inline TOML table that overrides settings for that prompt:
+    `{ prompt = "a castle at dusk", width = 1216, height = 832, seed = 7 }`. Once one line is a
+    table every prompt is written as a table, because TOML cannot hold a mixed list of strings and
+    tables as an array of tables.
+
+    An unparseable table line comes back with an `INVALID_TOML` key, so the trainer's loader
+    rejects it by name instead of the GUI quietly sampling a prompt that starts with `{`.
+    """
+
+    def __init__(self, placeholder="one prompt per line", height=110):
+        w = QtWidgets.QPlainTextEdit()
+        w.setPlaceholderText(placeholder)
+        w.setFixedHeight(height)
+        super().__init__(w)
+        w.textChanged.connect(self._emit)
+
+    def get(self):
+        import tomllib
+
+        out = []
+        for line in self.widget.toPlainText().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("{"):
+                try:
+                    out.append(tomllib.loads(f"x = {line}")["x"])
+                except tomllib.TOMLDecodeError as exc:
+                    out.append({"prompt": line, "INVALID_TOML": str(exc)})
+            else:
+                out.append(line)
+        if any(isinstance(p, dict) for p in out):
+            out = [p if isinstance(p, dict) else {"prompt": p} for p in out]
+        return out
+
+    def _set(self, value):
+        if isinstance(value, str):
+            value = [value]
+        lines = []
+        for p in value or []:
+            if isinstance(p, dict) and set(p) != {"prompt"}:
+                lines.append(_toml_inline(p))
+            else:
+                lines.append(p["prompt"] if isinstance(p, dict) else str(p))
+        self.widget.setPlainText("\n".join(lines))
+
+
+class StageListEditor(_Blockable):
+    """`schedule.stages` -- StageLR's segments as a grid.
+
+    One LR column holds each stage type's main value: the target `end_lr` of linear/cosine, the
+    `lr` of constant, the starting `max_val` of rex. `Min LR` is rex's `min_val`, unused by the
+    other types. Percent is shown as a percentage and stored as the fraction StageLR takes; the
+    running total is shown because the loader rejects a list that does not sum to 100%.
+
+    Rows survive `schedule.kind` being something else (the grid greys out and `get()` returns []),
+    so switching to cosine and back does not throw a hand-built schedule away.
+    """
+
+    TYPES = ("linear", "cosine", "constant", "rex")
+    _HEADERS = ("Type", "Percent", "LR", "Min LR (rex)")
+    _MAIN_KEY = {"linear": "end_lr", "cosine": "end_lr", "constant": "lr", "rex": "max_val"}
+
+    def __init__(self):
+        w = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.table = QtWidgets.QTableWidget(0, len(self._HEADERS))
+        self.table.setHorizontalHeaderLabels(self._HEADERS)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        head = self.table.horizontalHeader()
+        for i in range(len(self._HEADERS)):
+            head.setSectionResizeMode(i, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.table.setMinimumHeight(130)
+        lay.addWidget(self.table)
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(6)
+        self.add_btn = make_btn("Add stage")
+        self.del_btn = make_btn("Remove")
+        self.preset_btn = make_btn("Warmup / hold / REX")
+        self.preset_btn.setToolTip(
+            "A common three-stage shape: linear ramp to 7e-6 over 10%, hold for 50%, REX decay to "
+            "0 over the last 40%. Edit the LRs for your run.")
+        self.total = make_label("")
+        for b in (self.add_btn, self.del_btn, self.preset_btn):
+            row.addWidget(b)
+        row.addStretch(1)
+        row.addWidget(self.total)
+        lay.addLayout(row)
+        super().__init__(w)
+        self._active = True
+        self.add_btn.clicked.connect(self._add_row)
+        self.del_btn.clicked.connect(self._remove_row)
+        self.preset_btn.clicked.connect(self._load_preset)
+
+    def _make_row(self, kind, percent, lr, min_lr, index):
+        combo = NoScrollComboBox()
+        combo.addItems(self.TYPES)
+        combo.setCurrentIndex(self.TYPES.index(kind) if kind in self.TYPES else 0)
+        pct = NoScrollDoubleSpinBox()
+        pct.setLocale(QtCore.QLocale.c())
+        pct.setRange(0.0, 100.0)
+        pct.setDecimals(3)
+        pct.setSuffix(" %")
+        pct.setValue(float(percent) * 100.0)
+        main = QtWidgets.QLineEdit("" if lr is None else f"{lr:g}" if isinstance(lr, (int, float))
+                                   else str(lr))
+        main.setPlaceholderText("e.g. 7e-6")
+        low = QtWidgets.QLineEdit("" if min_lr is None else f"{min_lr:g}"
+                                  if isinstance(min_lr, (int, float)) else str(min_lr))
+        low.setPlaceholderText("0")
+        for col, cell in enumerate((combo, pct, main, low)):
+            self.table.setCellWidget(index, col, cell)
+        combo.currentIndexChanged.connect(self._changed)
+        pct.valueChanged.connect(self._changed)
+        main.textChanged.connect(self._changed)
+        low.textChanged.connect(self._changed)
+        self._sync_row(index)
+
+    def _sync_row(self, index):
+        kind = self.table.cellWidget(index, 0).currentText()
+        self.table.cellWidget(index, 3).setEnabled(kind == "rex" and self._active)
+
+    def _changed(self, *_):
+        for i in range(self.table.rowCount()):
+            self._sync_row(i)
+        self._update_total()
+        self._emit()
+
+    def _update_total(self):
+        total = sum(self.table.cellWidget(i, 1).value() for i in range(self.table.rowCount()))
+        ok = abs(total - 100.0) < 1e-4 or not self.table.rowCount()
+        self.total.setText(f"total {total:.3f}%" + ("" if ok else "  (must be 100%)"))
+
+    def _add_row(self):
+        i = self.table.rowCount()
+        self.table.insertRow(i)
+        prev = self._read_row(i - 1) if i else None
+        lr = prev.get(self._MAIN_KEY[prev["type"]]) if prev else None
+        self._make_row("constant" if prev else "linear", 0.0, lr, None, i)
+        self._changed()
+
+    def _remove_row(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            rows = [self.table.rowCount() - 1] if self.table.rowCount() else []
+        for r in rows:
+            self.table.removeRow(r)
+        self._changed()
+
+    def _load_preset(self):
+        self.set([
+            {"type": "linear", "end_lr": 7e-6, "percent": 0.1},
+            {"type": "constant", "lr": 7e-6, "percent": 0.5},
+            {"type": "rex", "max_val": 7e-6, "min_val": 0.0, "percent": 0.4},
+        ])
+        self._emit()
+
+    @staticmethod
+    def _number(text):
+        text = text.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            # Kept as text so the loader names the bad value instead of the GUI dropping it.
+            return text
+
+    def _read_row(self, i):
+        combo, pct, main, low = (self.table.cellWidget(i, c) for c in range(4))
+        kind = combo.currentText()
+        row = {"type": kind, "percent": round(pct.value() / 100.0, 8)}
+        value = self._number(main.text())
+        if value is not None:
+            row[self._MAIN_KEY[kind]] = value
+        if kind == "rex":
+            low_value = self._number(low.text())
+            row["min_val"] = 0.0 if low_value is None else low_value
+        return row
+
+    def get(self):
+        if not self._active:
+            return []
+        return [self._read_row(i) for i in range(self.table.rowCount())]
+
+    def _set(self, value):
+        self.table.setRowCount(0)
+        for stage in value or []:
+            i = self.table.rowCount()
+            self.table.insertRow(i)
+            kind = stage.get("type", "constant")
+            self._make_row(kind, float(stage.get("percent", 0.0)),
+                           stage.get(self._MAIN_KEY.get(kind, "lr")), stage.get("min_val"), i)
+        self._update_total()
+
+    def set_enabled(self, on: bool):
+        self._active = bool(on)
+        self.widget.setEnabled(on)
+        for i in range(self.table.rowCount()):
+            self._sync_row(i)

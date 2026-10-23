@@ -12,7 +12,8 @@ from dataclasses import asdict, replace
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from .caption import build_caption
+from .caption import build_caption, caption_identity
+from .moss_captions import annotations_for
 
 
 def digest(value):
@@ -183,8 +184,13 @@ class CaptionVariationCache:
 
             parsed = parse_cache_filename(entry.path)
             stem = parsed[0] if parsed else entry.path.stem
-            identity = (str(entry.path.parent.resolve()), stem, entry.tags, entry.nl)
-            pool = digest((identity, asdict(aug), seed, "caption-slots-v1"))
+            # The folder's name, not its absolute path: a cache built where the images live (e.g. a
+            # cheap caching box) stays valid on the training machine that downloads it elsewhere.
+            identity = (entry.path.parent.name, stem, entry.tags, entry.nl)
+            notes = annotations_for(entry, aug)
+            if notes is not None:   # MOSS captions/layout in use: their files (and the crop) are part of it
+                identity = identity + (notes.fingerprint(),)
+            pool = digest((identity, caption_identity(aug), seed, "caption-slots-v2"))
             ordinal = occurrence.get(pool, 0)
             occurrence[pool] = ordinal + 1
             self.indices.append((pool, ordinal))
@@ -203,7 +209,8 @@ class CaptionVariationCache:
                 ).fetchone()[0]
                 for slot in range(existing, count):
                     text = build_caption(
-                        entry.tags, entry.nl, aug, random.Random(digest((pool, slot)))
+                        entry.tags, entry.nl, aug, random.Random(digest((pool, slot))),
+                        annotations_for(entry, aug),
                     )
                     key = digest(text)
                     db.execute(
@@ -244,6 +251,27 @@ class CaptionVariationCache:
                 pending_embeddings=pending_count,
             )
         db.close()
+
+    def require(self, texts):
+        """Make sure `texts` get embedded too -- validation prompts, eval captions -- so
+        `get()` can serve them. Call after `prepare()`, which rebuilds the pending list."""
+        texts = list(dict.fromkeys(texts))
+        if not texts:
+            return
+        with closing(self.writer()) as db:
+            for text in texts:
+                key = digest(text)
+                db.execute("INSERT OR IGNORE INTO captions VALUES (?,?)", (key, text))
+                db.execute(
+                    """INSERT OR IGNORE INTO pending SELECT ?, ? WHERE NOT EXISTS
+                    (SELECT 1 FROM embeddings WHERE encoder=? AND caption=?)""",
+                    (self.encoder_key, key, self.encoder_key, key))
+            db.commit()
+            pending = db.execute("SELECT COUNT(*) FROM pending WHERE encoder=?",
+                                 (self.encoder_key,)).fetchone()[0]
+        stats = getattr(self, "statistics", None)
+        if stats is not None:
+            stats.update(pending_embeddings=pending, extra_texts=len(texts))
 
     def pending(self, rank=0, world_size=1):
         if world_size < 1 or not 0 <= rank < world_size:

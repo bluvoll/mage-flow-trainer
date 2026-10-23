@@ -18,6 +18,8 @@ def validate_static_captions(cfg):
     ]
     if caption.caption_mode == "mixed":
         changing.append("caption_mode=mixed")
+    if caption.attribution_enabled and caption.attribution_position == "random":
+        changing.append("attribution_position=random")
     if changing and not getattr(getattr(cfg, "train", None), "caption_variations", 0):
         raise ValueError(
             "cache_text_embeddings requires fixed captions; disable "

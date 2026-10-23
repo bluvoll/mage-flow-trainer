@@ -79,8 +79,11 @@ def load_components(
     tokenizer_path=None,
     compressed_adaln_dtype="float32",
     flux2_vae=False,
+    vae_decoder=False,
     model_family="auto",
 ):
+    """`vae_decoder=True` loads the VAE for decoding (validation samples): Mage-VAE keeps its
+    decoder and drops the encoder instead of the other way round."""
     path = Path(path)
     family = resolve_model_family(path, model_family)
     transformer = None
@@ -173,17 +176,21 @@ def load_components(
         else:
             from .modules.mage_vae import MageVAE
             vae = MageVAE(str(vae_path or path / "vae/diffusion_pytorch_model.safetensors"), sample_posterior=False)
-            del vae.decoder_model
+            if vae_decoder:
+                del vae.dconv_encoder
+            else:
+                del vae.decoder_model
         vae.requires_grad_(False).eval().to(dtype=torch.float32 if family in ("flux3", "moss_image") else dtype)
     return MageFlowComponents(transformer, encoder, vae, tokenizer, family)
 
 
 @torch.no_grad()
 def encode_prompts(components, prompts, device, max_length=512, *, embedding_only=False):
-    if components.model_family == 'moss_image':
+    family = getattr(components, 'model_family', 'mage_flow')   # component bundles built by hand may omit it
+    if family == 'moss_image':
         from .moss_loader import encode_prompts as encode_moss
         return encode_moss(components, prompts, device, max_length)
-    if components.model_family == 'flux3':
+    if family == 'flux3':
         from .flux3_loader import encode_prompts as encode_flux3
         return encode_flux3(components, prompts, device, max_length)
     tokens = components.tokenizer(

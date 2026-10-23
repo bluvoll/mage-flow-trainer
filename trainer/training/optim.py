@@ -199,14 +199,27 @@ def _rerex_lambda(decay_steps: int, cfg: ScheduleConfig):
 
 
 def build_scheduler(
-    optimizer: torch.optim.Optimizer, cfg: ScheduleConfig, total_steps: int
+    optimizer: torch.optim.Optimizer, cfg: ScheduleConfig, total_steps: int,
+    *, base_lr: float | None = None, process_scale: int = 1,
 ):
     """A LambdaLR whose multiplier is applied to each group's own peak LR, so the per-component
     ratios set in `[component_lr]` are preserved across warmup and decay.
 
     `total_steps` is expected to already be scaled by world size -- Accelerate's wrapper advances
     the inner scheduler once per process per `step()`. See `Trainer._build_optimizer`.
+
+    `kind = "stage"` additionally needs `base_lr` (the `optimizer.lr` its absolute stage LRs are
+    relative to) and `process_scale` (that same world-size factor), because StageLR is fitted in
+    optimizer-update units rather than in scaled scheduler steps.
     """
+    if cfg.kind == "stage":
+        from .stage_lr import StagePlan, stage_lambda
+
+        scale = max(1, int(process_scale))
+        plan = StagePlan(cfg.stages, total_steps // scale, cfg.warmup_steps // scale,
+                         base_lr if base_lr is not None else optimizer.param_groups[0]["lr"])
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, stage_lambda(plan, scale))
+
     warmup = max(0, cfg.warmup_steps)
     decay_steps = max(1, total_steps - warmup)
     floor = cfg.min_lr_ratio

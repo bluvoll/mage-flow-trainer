@@ -10,7 +10,8 @@ from trainer.training.step_safety import (
 )
 
 
-def test_real_loop_weights_images_and_skips_invalid_updates():
+def test_real_loop_weights_images_and_skips_invalid_updates(tmp_path, monkeypatch):
+    from trainer.training import train as train_module
     from trainer.training.train import Trainer
     acc = Accelerator(cpu=True, gradient_accumulation_steps=2)
     model = torch.nn.Linear(1, 1, bias=False)
@@ -38,6 +39,13 @@ def test_real_loop_weights_images_and_skips_invalid_updates():
     trainer._report = trainer._set_phase = trainer._set_rti_budget = trainer._apply_lr_mul = lambda: None
     trainer._all_modules_params = lambda: model.parameters()
     trainer._step = lambda batch: (model(batch['x']).mean(), None)
+    # The fork's loop extras: tracker, save/quit signal files, periodic eval/samples.
+    trainer.cfg.train.resume_from = None
+    trainer.out_dir = tmp_path
+    trainer.evaluator = trainer.validation_sampler = None
+    trainer._samples_since_log = 0
+    trainer._periodic = lambda *_: False
+    monkeypatch.setattr(train_module, 'build_tracker', lambda *a, **k: NS(log=lambda *a, **k: None, finish=lambda: None))
     gradients, ema_calls = [], []
     opt.optimizer.register_step_pre_hook(lambda optim, args, kwargs: gradients.append(model.weight.grad.item()))
     trainer.train()

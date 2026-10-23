@@ -35,47 +35,42 @@ def _images(root: Path) -> list[Path]:
     )
 
 
-def config_cache_commands(args):
-    """Use the config's exact subset paths and bucket/VAE settings."""
+def config_cache_args(args) -> argparse.Namespace:
+    """The `cache` arguments a training TOML implies: every subset (inline or `subsets_file`) and
+    the `[eval]` folder, with the config's bucket, VAE and storage settings."""
     from ..training.config import load_config
     cfg = load_config(args.config)
-    commands = []
-    for subset in cfg.dataset.effective_subsets():
-        command = [sys.executable, "-u", "-m", "trainer.tools.cache_latents", "cache", subset.path,
-                   "--model-path", cfg.train.model_path, "--model-family", cfg.train.model_family,
-                   "--resolution", *map(str, args.resolution or cfg.dataset.tiers),
-                   "--min-bucket-reso", str(cfg.dataset.min_bucket_reso),
-                   "--max-bucket-reso", str(cfg.dataset.max_bucket_reso),
-                   "--bucket-reso-steps", str(cfg.dataset.bucket_reso_steps),
-                   "--batch-size", str(args.batch_size),
-                   "--cache-validation", cfg.dataset.cache_validation]
-        if cfg.train.vae_path:
-            command += ["--vae-path", cfg.train.vae_path]
-        if cfg.train.flux2_vae:
-            command.append("--flux2-vae")
-        if not cfg.dataset.bucket_no_upscale:
-            command.append("--upscale")
-        if cfg.dataset.multires_training:
-            command.append("--multires")
-        if args.devices:
-            command += ["--devices", args.devices]
-        for flag in ("overwrite", "dry_run", "allow_missing_captions"):
-            if getattr(args, flag):
-                command.append("--" + flag.replace("_", "-"))
-        commands.append(command)
-    return commands
+    paths = [s.path for s in cfg.dataset.effective_subsets()]
+    if cfg.eval.enabled:
+        paths.append(cfg.eval.path)
+    return argparse.Namespace(
+        path=list(dict.fromkeys(paths)),
+        model_path=cfg.train.model_path, model_family=cfg.train.model_family,
+        vae_path=cfg.train.vae_path, flux2_vae=cfg.train.flux2_vae,
+        resolution=list(args.resolution or cfg.dataset.tiers),
+        min_bucket_reso=cfg.dataset.min_bucket_reso, max_bucket_reso=cfg.dataset.max_bucket_reso,
+        bucket_reso_steps=cfg.dataset.bucket_reso_steps,
+        upscale=not cfg.dataset.bucket_no_upscale, multires=cfg.dataset.multires_training,
+        latent_dtype=args.latent_dtype or cfg.dataset.latent_dtype,
+        overwrite=args.overwrite, allow_missing_captions=args.allow_missing_captions,
+        dry_run=args.dry_run, device=args.device, batch_size=args.batch_size,
+        devices=args.devices, shard_index=args.shard_index, num_shards=args.num_shards,
+        cache_validation=cfg.dataset.cache_validation,
+    )
 
 
 def cmd_cache_config(args):
+    """Cache every folder a config trains on, in ONE process.
+
+    This used to spawn one `cache` subprocess per subset, each loading the VAE again -- harmless
+    for three folders, ruinous for a per-artist dataset: ten thousand subsets meant ten thousand
+    interpreter starts and VAE loads (and one command listing them all would overflow the Windows
+    command line). In-process the VAE loads once, and `--devices` shards every folder's images
+    across the GPUs together.
+    """
     if args.batch_size < 1:
         raise ValueError("--batch-size must be at least 1")
-    commands = config_cache_commands(args)
-    for i, command in enumerate(commands, 1):
-        print(f"\nCaching subset {i}/{len(commands)}: {command[5]}", flush=True)
-        result = subprocess.run(command)
-        if result.returncode:
-            return result.returncode
-    return 0
+    return cmd_cache(config_cache_args(args))
 
 
 def cmd_cache(args) -> int:
@@ -96,19 +91,41 @@ def cmd_cache(args) -> int:
             children.append(subprocess.Popen(command, env=env))
         statuses = [child.wait() for child in children]
         return 0 if all(status == 0 for status in statuses) else 1
-    root = Path(args.path)
-    if not root.is_dir():
-        print(f"not a directory: {root}")
+    roots = [Path(p) for p in ([args.path] if isinstance(args.path, str) else args.path)]
+    missing = [str(r) for r in roots if not r.is_dir()]
+    if missing:
+        print(f"not a directory: {missing[0]}"
+              + (f" (and {len(missing) - 1} more)" if len(missing) > 1 else ""))
         return 1
 
-    files = _images(root)
+    files = [f for root in roots for f in _images(root)]
     if not files:
-        print(f"no images in {root}")
+        # Latents-only folders (images deleted after caching) have nothing left to encode. That
+        # is a finished cache, not an error -- otherwise Start Training's cache step would refuse
+        # to train a dataset that is exactly as it should be.
+        from ..data.cache import find_cached_latents
+        if any(find_cached_latents(r) for r in roots):
+            print(f"no images to cache in {len(roots)} folder(s); cached latents present, "
+                  f"nothing to do")
+            return 0
+        print(f"no images in {roots[0] if len(roots) == 1 else f'any of {len(roots)} folders'}")
         return 1
+    if len(roots) > 1:
+        print(f"{len(roots)} folders, {len(files)} images")
+    if args.num_shards > 1:
+        # Sharded before planning, so each GPU's process reads only its own image headers -- on a
+        # 600k-image dataset, every child planning everything would be the slow part.
+        files = files[args.shard_index::args.num_shards]
+        print(f"shard {args.shard_index + 1}/{args.num_shards}: {len(files)} images on "
+              f"{args.device}")
+
+    from ..data.cache import LATENT_DTYPES
+    storage = LATENT_DTYPES[args.latent_dtype]
+    elem = torch.empty((), dtype=storage).element_size()
 
     tiers = sorted(set(args.resolution))
     cfg = DatasetConfig(
-        path=str(root),
+        path=str(roots[0]),
         resolutions=tiers,
         min_bucket_reso=args.min_bucket_reso,
         max_bucket_reso=args.max_bucket_reso,
@@ -144,7 +161,8 @@ def cmd_cache(args) -> int:
           f"{sum(len(v) for v in plan.values())} cache files")
     for t in tiers:
         bs = [b for v in plan.values() for tt, b in v if tt == t]
-        mb = sum(16 * 4 * (b[0] * b[1] // 64) for b in bs) / 1e6
+        # 128 channels x (w/16)(h/16) cells = w*h/2 elements per latent.
+        mb = sum(b[0] * b[1] // 2 * elem for b in bs) / 1e6
         note = f", {collapsed[t]} collapsed onto a lower tier" if collapsed[t] else ""
         print(f"  tier {t:>5}: {len(bs):>5} images, {len(set(bs)):>4} buckets, ~{mb:>7.0f} MB{note}")
 
@@ -169,11 +187,6 @@ def cmd_cache(args) -> int:
         print("\n--dry-run: nothing written")
         return 0
 
-    if args.num_shards > 1:
-        files = files[args.shard_index::args.num_shards]
-        plan = {path: plan[path] for path in files}
-        print(f"\nshard {args.shard_index + 1}/{args.num_shards}: {len(files)} images on {args.device}")
-
     from ..modeling.loader import load_components
 
     # A named FLUX.2 checkpoint is unambiguous. Keep the explicit switch for
@@ -193,13 +206,17 @@ def cmd_cache(args) -> int:
     from ..data.cache_provenance import vae_identity
     provenance = vae_identity(args.model_path, args.vae_path, args.model_family, args.flux2_vae)
     cacher = LatentCacher(components.vae, device=args.device, flux2_vae=args.flux2_vae,
-                          provenance=provenance, cache_validation=args.cache_validation)
+                          provenance=provenance, cache_validation=args.cache_validation,
+                          storage_dtype=storage)
+    print(f"storing latents as {args.latent_dtype}")
 
     work: dict[tuple[int, tuple[int, int]], list[Path]] = {}
     for path in files:
         for tier, bucket in plan[path]:
             work.setdefault((tier, bucket), []).append(path)
     total = sum(len(paths) for paths in work.values())
+    # At most ~400 progress lines whatever the size; every 25 was 24,000 lines at 600k images.
+    every = max(25, total // 400)
     done = skipped = seen = 0
     for (tier, bucket), paths in work.items():
         for start in range(0, len(paths), args.batch_size):
@@ -209,7 +226,7 @@ def cmd_cache(args) -> int:
             written = cacher.cache_batch(batch, managers[tier], overwrite=args.overwrite)
             done += len(written)
             seen += len(batch)
-            if seen % 25 < len(batch) or seen == total:
+            if seen % every < len(batch) or seen == total:
                 print(f"  {seen}/{total} cache entries  cached {done}, skipped {skipped}", flush=True)
 
     print(f"\ncached {done}, skipped {skipped} (already present)")
@@ -314,22 +331,93 @@ def cmd_audit(args) -> int:
     return 1
 
 
+def cmd_convert(args) -> int:
+    """Rewrite existing caches in another storage precision, in place, without the VAE.
+
+    The cheap way to halve a finished float32 cache: no re-encode, no GPU. Each file is written to
+    a temporary name and swapped in with `os.replace`, so an interrupted run leaves every file
+    either converted or untouched, never truncated.
+    """
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+
+    from ..data.cache import LATENT_DTYPES, find_cached_latents, storable
+
+    target = LATENT_DTYPES[args.dtype]
+    roots = [Path(p) for p in args.path]
+    if args.config:
+        roots += [Path(p) for p in config_cache_args(argparse.Namespace(
+            config=args.config, resolution=None, latent_dtype=None, overwrite=False,
+            allow_missing_captions=False, dry_run=False, device="cpu", batch_size=1, devices="",
+            shard_index=0, num_shards=1)).path]
+    if not roots:
+        print("give one or more folders, or --config")
+        return 1
+    converted = kept = fallback = 0
+    before = after = 0
+    for root in dict.fromkeys(roots):
+        for variants in find_cached_latents(root).values():
+            for path, _ in variants:
+                size = path.stat().st_size
+                before += size
+                with safe_open(str(path), framework="pt") as fh:
+                    meta = fh.metadata() or {}
+                    tensor = fh.get_tensor("latents")
+                if tensor.dtype == target:
+                    kept += 1
+                    after += size
+                    continue
+                out = storable(tensor.float(), target)
+                fallback += out.dtype != target
+                if args.dry_run:
+                    after += out.numel() * out.element_size()
+                    converted += 1
+                    continue
+                tmp = path.with_name(path.name + ".tmp")
+                save_file({"latents": out.contiguous()}, str(tmp), metadata=meta)
+                os.replace(tmp, path)
+                after += path.stat().st_size
+                converted += 1
+    verb = "would convert" if args.dry_run else "converted"
+    print(f"{verb} {converted} cache file(s) to {args.dtype}, {kept} already {args.dtype}; "
+          f"{before / 1e9:.2f} GB -> {after / 1e9:.2f} GB")
+    if fallback:
+        print(f"{fallback} file(s) stayed float32: their values overflow {args.dtype}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Mage-Flow latent cache tools")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    dtypes = ["float32", "float16", "bfloat16"]
 
-    cc = sub.add_parser("cache-config", help="cache every dataset subset from a training TOML")
+    cc = sub.add_parser("cache-config", help="cache every folder a training TOML uses (subsets, "
+                                             "subsets_file and [eval]) in one process")
     cc.add_argument("config")
     cc.add_argument("--resolution", type=int, nargs="+", help="Override config resolution tiers")
     cc.add_argument("--batch-size", type=int, default=1)
     cc.add_argument("--devices", default="", help="Physical GPU IDs, e.g. 0,1; batch size is per GPU")
+    cc.add_argument("--device", default="cuda")
+    cc.add_argument("--latent-dtype", choices=dtypes, default=None,
+                    help="Override dataset.latent_dtype for newly written caches")
     cc.add_argument("--overwrite", action="store_true")
     cc.add_argument("--dry-run", action="store_true")
     cc.add_argument("--allow-missing-captions", action="store_true")
+    cc.add_argument("--shard-index", type=int, default=0, help=argparse.SUPPRESS)
+    cc.add_argument("--num-shards", type=int, default=1, help=argparse.SUPPRESS)
     cc.set_defaults(func=cmd_cache_config)
 
+    cv = sub.add_parser("convert", help="rewrite existing caches in another precision, in place")
+    cv.add_argument("path", nargs="*", help="dataset folder(s)")
+    cv.add_argument("--config", help="convert every folder this training TOML uses")
+    cv.add_argument("--dtype", choices=dtypes, default="float16")
+    cv.add_argument("--dry-run", action="store_true", help="report the saving, write nothing")
+    cv.set_defaults(func=cmd_convert)
+
     c = sub.add_parser("cache", help="encode images to cached latents")
-    c.add_argument("path")
+    c.add_argument("path", nargs="+", help="one or more dataset folders")
+    c.add_argument("--latent-dtype", choices=dtypes, default="float32",
+                   help="storage precision; float16 halves the cache on disk")
     c.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     c.add_argument("--model-family", choices=["auto", "mage_flow", "flux3", "moss_image"], default="auto")
     c.add_argument("--cache-validation", choices=("warn", "strict", "off"), default="warn")

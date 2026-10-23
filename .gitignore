@@ -57,6 +57,11 @@ benchmarks/kuse-lora/
 
 benchmarks/readme-vram/
 
+# Remote training: per-job configs and logs on the GPU box, and the GUI's saved connect link
+# (it carries the server's access token).
+remote_jobs/
+configs/remote/
+.gui_remote.json
 # Local experiments, downloaded weights/packages, and reference archives.
 benchmarks/
 models/

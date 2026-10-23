@@ -177,7 +177,8 @@ def forward_packed(model, images, times, context, *, token_ids=None,
     if token_ids is not None and len(token_ids) != len(images):
         raise ValueError('Self-Flow needs one timestep mask per image')
     shapes = [im.shape[-2:] for im in images]
-    if any(im.ndim != 5 or im.shape[:3] != (1, model.in_channels, 1) for im in images):
+    from .sampling import latent_channels
+    if any(im.ndim != 5 or im.shape[:3] != (1, latent_channels(model), 1) for im in images):
         raise ValueError('Packed Self-Flow latents must be [1,C,1,H,W]')
     lengths = [h*w for h,w in shapes]
     text_lengths = text_mask.sum(1).tolist()

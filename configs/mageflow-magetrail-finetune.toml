@@ -1,0 +1,85 @@
+# MageTrail-style full finetune: thousands of per-artist folders from Illustration Scrapping
+# Studio's training-layout export, StageLR, artist attribution, wandb + TensorBoard, validation
+# samples and held-out eval. Paths are placeholders -- the config will not validate until
+# `subsets_file` points at a real export. See docs/magetrail-features.md.
+#
+# Typical two-stage plan: train this at resolution 512, then copy it, point
+# `train.transformer_path` at the 512 stage's final checkpoint, set `resolution = 1024` and the
+# epochs/LRs for the high-resolution stage. Cache each tier first:
+#     python -m trainer.tools.cache_latents cache-config configs/mageflow-magetrail-finetune.toml --devices 0,1,2,3
+
+[adapter]
+kind = "none"
+
+[train]
+model_path = "mage-flow"
+output_dir = "output"
+run_name = "magetrail-512"
+epochs = 22
+batch_size = 16
+gradient_accumulation_steps = 1
+dtype = "bfloat16"
+pack_resolutions = true
+attention_backend = "torch_varlen"
+compile = "default"
+cache_text_embeddings = true
+caption_variations = 8           # augmented captions per image, encoded once into SQLite
+num_workers = 4
+save_every_epochs = 2
+keep_last_n = 3
+save_optimizer_state = true
+log_every = 10
+progress = "plain"
+
+[dataset]
+subsets_file = "/data/magetrail/exports/run-1/training/folders.csv"
+# subsets_root = "/workspace/library/images"   # if the export was written on another machine
+source = "auto"                  # latents-only once images are deleted after caching
+resolution = 512
+latent_dtype = "float16"         # half the cache on disk; training reads either
+
+[dataset.caption]
+caption_mode = "mixed"
+shuffle_tags = true
+tag_dropout_percent = 0.1
+caption_dropout_percent = 0.05
+nl_shuffle_sentences = true
+attribution_patterns = ['^drawn by\s']
+attribution_position = "fixed"
+attribution_dropout_immune = true
+attribution_dedupe_on_combine = true
+
+[optimizer]
+kind = "adamw8bit"               # SDNQ 8-bit AdamW with stochastic rounding
+lr = 1e-7                        # StageLR's first stage ramps from here
+use_kahan = true
+quantize_state = true
+
+[schedule]
+kind = "stage"
+stages = [
+  { type = "linear",   end_lr = 7e-6, percent = 0.05 },
+  { type = "constant", lr = 7e-6,     percent = 0.55 },
+  { type = "rex",      max_val = 7e-6, min_val = 0.0, percent = 0.40 },
+]
+
+[tracking]
+backends = ["tensorboard", "wandb"]   # wandb needs WANDB_API_KEY or `wandb login`; never a key here
+project = "magetrail"
+wandb_tags = ["v0.4", "512"]
+
+[sampling]
+prompts = [
+  "Drawn by emily (pure dream), 1girl, solo, smile, outdoors, masterpiece",
+  "Drawn by alice, 1girl, night, city lights, looking at viewer",
+  "1boy, armor, castle, dramatic lighting",
+]
+every_n_steps = 1000
+at_start = true
+width = 768
+height = 768
+
+[eval]
+path = "/data/magetrail/heldout"      # held-out images, cached at the same tiers
+every_n_steps = 500
+max_samples = 400

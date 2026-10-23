@@ -4,6 +4,7 @@ rem Mage-Flow trainer installer -- Windows.
 rem
 rem   install.bat              install into .\venv and write .\start-gui.bat
 rem   install.bat --recreate   delete an existing .\venv first
+rem   install.bat --gui-only   only the GUI, for a laptop that trains on a remote GPU box (CPU torch, ~1 GB)
 rem
 rem Creates `venv\` (not `.venv\`) deliberately: the repo's own development environment is `.venv`,
 rem managed by uv against uv.lock, and an installed copy must not silently take it over.
@@ -17,10 +18,14 @@ rem local change. Matches uv.lock; bump both together after re-running the parit
 set "DIFFUSERS_REF=50e7158093710f9c1b4ea9ff100137a91c9228f3"
 set "TORCH_INDEX=https://download.pytorch.org/whl/cu128"
 set "RECREATE=0"
+set "GUIONLY=0"
 
-if /i "%~1"=="--recreate" set "RECREATE=1"
-if /i "%~1"=="-h" goto :help
-if /i "%~1"=="--help" goto :help
+for %%A in (%*) do (
+    if /i "%%~A"=="--recreate" set "RECREATE=1"
+    if /i "%%~A"=="--gui-only" set "GUIONLY=1"
+    if /i "%%~A"=="-h" goto :help
+    if /i "%%~A"=="--help" goto :help
+)
 
 rem ---------------------------------------------------------------- find an interpreter
 rem 3.11 first: every measurement in the README was taken on it. 3.12 and 3.13 both resolve to the
@@ -78,6 +83,7 @@ if not exist "%VPY%" (
 )
 
 rem ---------------------------------------------------------------- dependencies
+if "%GUIONLY%"=="1" goto :gui_only
 where uv >nul 2>&1
 if not errorlevel 1 (
     rem uv honours uv.lock, so this reproduces the exact resolved set including the git diffusers
@@ -140,6 +146,31 @@ exit /b 0
 
 :help
 echo install.bat --recreate   delete an existing .\venv first
+echo install.bat --gui-only   only the GUI, for remote training ^(CPU torch, no CUDA^)
+exit /b 0
+
+rem ---------------------------------------------------------------- GUI only
+rem The laptop side of remote training: the GUI, the remote client and the config classes it validates
+rem against. CPU torch from PyTorch's CPU index; everything else pinned like requirements.txt.
+:gui_only
+echo ==^> GUI-only install ^(for remote training: CPU PyTorch, no CUDA, diffusers or SDNQ^)
+"%VPY%" -m pip install --upgrade pip >nul
+"%VPY%" -m pip install -r requirements-gui.txt --extra-index-url https://download.pytorch.org/whl/cpu || (
+    echo xxx pip install failed
+    exit /b 1
+)
+"%VPY%" -m pip install --no-deps -e . || (
+    echo xxx could not install the trainer package
+    exit /b 1
+)
+call :launcher start-gui.bat       trainer.gui                 "Start the Mage-Flow trainer GUI."
+"%VPY%" -c "import trainer.gui.app" || (
+    echo xxx the GUI does not import -- see the error above
+    exit /b 1
+)
+echo.
+echo ==^> done.  Start the GUI with:  start-gui.bat
+echo     Then paste the link your GPU box prints into the Remote bar and press Connect.
 exit /b 0
 
 rem ---------------------------------------------------------------- subroutines

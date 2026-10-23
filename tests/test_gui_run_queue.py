@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from pathlib import Path
 from PySide6 import QtCore, QtWidgets
 
 from trainer.gui import app as gui_module, bridge
@@ -82,7 +83,13 @@ def test_configs_cache_then_train_in_order_without_rewriting(queue_gui):
     expected = [(False, '/dataset0'), (True, str(paths[0])), (False, '/dataset1'), (True, str(paths[1]))]
     for i, (training, argument) in enumerate(expected):
         runner = FakeRunner.instances[i]
-        assert argument in runner.launch.argv
+        if training:
+            assert argument in runner.launch.argv
+        else:
+            # The fork caches through one `cache-config` call on a config naming the dataset.
+            argv = runner.launch.argv
+            assert argv[argv.index("cache-config") + 1].endswith(".toml")
+            assert argument in Path(argv[argv.index("cache-config") + 1]).read_text(encoding="utf-8")
         assert gui._running_training == training
         if training:
             assert gui.metrics.elapsed_timer.isActive()

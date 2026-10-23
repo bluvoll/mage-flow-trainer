@@ -1,0 +1,9 @@
+# Optional experiment trackers for [tracking] backends. Install only the ones you use:
+#     pip install -r requirements-tracking.txt
+# Kept out of pyproject/uv.lock on purpose: adding them there would re-resolve the pinned
+# torch/SDNQ/diffusers set. Each tracker is imported lazily; a missing one is a warning, not a crash.
+# Versions are the ones the fork's tests ran against. Trackio is pre-release and has changed its
+# storage schema between versions, hence the pin.
+tensorboard==2.21.0
+wandb==0.30.0
+trackio==0.40.0

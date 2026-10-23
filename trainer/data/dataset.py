@@ -20,7 +20,9 @@ from torch.utils.data import Dataset, Sampler
 
 from .bucket import BucketManager, verify_max_resolution
 from .caption import CaptionConfig, build_caption, read_caption_files
+from .moss_captions import annotations_for
 from .texture import TextureConfig, fitting_canvases
+from .masks import LATENT_SCALE, find_masks, load_mask, loss_weights
 from .cache import (
     CACHE_SUFFIX,
     cache_path,
@@ -28,6 +30,7 @@ from .cache import (
     image_to_tensor,
     load_and_crop,
     load_cached_latent,
+    parse_cache_filename,
     parse_original_size,
     read_cache_metadata,
 )
@@ -69,6 +72,9 @@ class SubsetConfig:
     path: str
     num_repeats: int = 1
     texture: bool = True
+    # Folder of painted loss masks for this subset's images, matched by filename stem. See
+    # `DatasetConfig.mask_path`; unset leaves the subset unmasked.
+    mask_path: str | None = None
 
     def __post_init__(self):
         if self.num_repeats < 1:
@@ -77,12 +83,137 @@ class SubsetConfig:
             )
 
 
+def _scan_workers(n_subsets: int) -> int:
+    """Threads for scanning subsets: 1 (the original sequential scan) for a handful of folders,
+    up to 16 for per-artist datasets. MAGEFLOW_SCAN_WORKERS overrides; 1 disables threading."""
+    import os
+
+    override = os.environ.get("MAGEFLOW_SCAN_WORKERS")
+    if override:
+        return max(1, int(override))
+    if n_subsets < 8:
+        return 1
+    return max(1, min(16, n_subsets, (os.cpu_count() or 4) * 2))
+
+
+def _check_duplicate_subsets(subsets) -> None:
+    seen = set()
+    for s in subsets:
+        if s.path in seen:
+            raise ValueError(
+                f"dataset.subsets lists {s.path!r} twice; use num_repeats to weight it instead"
+            )
+        seen.add(s.path)
+
+
+_TRUE = {"1", "true", "yes", "y", "on"}
+_FALSE = {"0", "false", "no", "n", "off", ""}
+
+
+def _manifest_bool(value, where: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    raise ValueError(f"{where}: texture must be true/false, got {value!r}")
+
+
+def load_subsets_file(path: str | Path, root: str | Path | None = None) -> list[SubsetConfig]:
+    """Read a subset manifest: CSV, JSON or TOML.
+
+    * CSV: a header row with `path`, optionally `num_repeats` (or `repeats`), `texture` and
+      `mask_path` (the folder's painted loss masks; blank = unmasked). Other columns are ignored,
+      so the Studio's `folders.csv` (site, artist, tag, folder, path, images, planned_images,
+      repeats, mask_path) reads as-is.
+    * JSON: a list of objects with the same keys (the Studio's `folders.json`), or
+      `{"subsets": [...]}`.
+    * TOML: `[[subsets]]` or diffusion-pipe `[[directory]]` tables (the Studio's `dataset.toml`).
+
+    A relative `mask_path` resolves against the manifest's own folder, also with `root` (which
+    re-roots only the image folders), so masks shipped next to the manifest are found wherever the
+    dataset is downloaded.
+
+    Rows whose repeats are 0 -- the Studio writes that for a folder emptied by curation -- or whose
+    `images` column is 0 are skipped rather than rejected: they are folders with nothing to train.
+    """
+    import csv
+    import json
+    import tomllib
+
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"dataset.subsets_file not found: {p}")
+    suffix = p.suffix.lower()
+    if suffix == ".csv":
+        with p.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.DictReader(fh))
+        if rows and "path" not in rows[0]:
+            raise ValueError(f"{p}: CSV needs a `path` column, found {list(rows[0])}")
+    elif suffix == ".json":
+        data = json.loads(p.read_text(encoding="utf-8"))
+        rows = data.get("subsets", data.get("directory")) if isinstance(data, dict) else data
+        if not isinstance(rows, list):
+            raise ValueError(f"{p}: expected a JSON list of folders or {{\"subsets\": [...]}}")
+    elif suffix == ".toml":
+        data = tomllib.loads(p.read_text(encoding="utf-8"))
+        rows = data.get("subsets") or data.get("directory") or data.get("dataset", {}).get("subsets")
+        if not isinstance(rows, list):
+            raise ValueError(f"{p}: expected [[subsets]] or [[directory]] tables")
+    else:
+        raise ValueError(f"{p}: dataset.subsets_file must be .csv, .json or .toml")
+
+    out: list[SubsetConfig] = []
+    for i, row in enumerate(rows):
+        where = f"{p.name} row {i + 1}"
+        if not isinstance(row, dict) or not str(row.get("path") or "").strip():
+            raise ValueError(f"{where}: missing `path`")
+        raw = row.get("num_repeats", row.get("repeats", 1))
+        try:
+            repeats = int(float(raw)) if str(raw).strip() != "" else 1
+            images = row.get("images")
+            empty = images is not None and str(images).strip() != "" and int(float(images)) == 0
+        except ValueError:
+            raise ValueError(f"{where}: repeats/images must be numbers, got {raw!r}") from None
+        if repeats == 0 or empty:
+            continue
+        folder = Path(str(row["path"]).strip())
+        if root:
+            # Manifest written elsewhere: keep the folder name, swap everything above it. Split on
+            # both separators so a Windows-written path re-roots correctly on Linux and vice versa.
+            folder = Path(root) / str(row["path"]).strip().replace("\\", "/").rstrip("/").split("/")[-1]
+        elif not folder.is_absolute():
+            folder = p.parent / folder
+        texture = _manifest_bool(row.get("texture", True), where)
+        mask = str(row.get("mask_path") or "").strip()
+        if mask and not Path(mask).is_absolute():
+            mask = str(p.parent / mask)
+        out.append(SubsetConfig(path=str(folder), num_repeats=repeats, texture=texture,
+                                mask_path=mask or None))
+    if not out:
+        raise ValueError(f"{p}: no folders with images listed")
+    return out
+
+
 @dataclass
 class DatasetConfig:
     # Exactly one of `path` / `subsets`. `path` is the single-directory form and stays the default
     # so every existing config is untouched; `subsets` is the multi-source form.
     path: str | None = None
     subsets: list[SubsetConfig] = field(default_factory=list)
+    # Subsets listed in a file instead of `[[dataset.subsets]]` blocks -- for datasets with
+    # thousands of folders (one per artist), where inline tables make the TOML unreadable and the
+    # GUI's subset grid unusable. Accepts Illustration Scrapping Studio's training-layout export
+    # (`folders.csv` / `folders.json` / `dataset.toml`) as written, or any CSV/JSON with a `path`
+    # column and optional `num_repeats` (or `repeats`) and `texture`. Relative paths resolve
+    # against the file's folder. Combines with inline `subsets`; excludes `path`.
+    subsets_file: str | None = None
+    # Re-root every `subsets_file` folder under this directory, keeping only its folder name. For
+    # a manifest written on another machine: `/home/jovyan/lib/images/emily` becomes
+    # `<subsets_root>/emily`.
+    subsets_root: str | None = None
     resolution: int = 1024                 # AREA budget: max_reso = (r, r)
     # Multi-resolution: train every image at every listed area budget. Unset -> [resolution], which
     # is bit-identical to single-tier behaviour. A tier is a repeat with a different resolution, so
@@ -104,6 +235,20 @@ class DatasetConfig:
     num_repeats: int = 1
     caption: CaptionConfig = field(default_factory=CaptionConfig)
 
+    # Painted loss masks (`masks.py`): a grayscale image per training image, matched by filename
+    # stem, white = learn this region. `mask_path` pairs with `path`; with `subsets`, each subset
+    # names its own. Once a folder is set every image in it needs a mask -- a stem mismatch that
+    # silently left most of a dataset unmasked would look exactly like a run that worked.
+    mask_path: str | None = None
+    # Off trains unmasked without clearing the folders, for an A/B against the same config.
+    use_masks: bool = True
+    # Loss weight where the mask is black. 0 ignores those pixels entirely; 1 is unmasked training.
+    mask_outside_weight: float = 0.0
+    # Grow (negative: shrink) and Gaussian-soften every mask, in bucket pixels, before it is reduced
+    # to the latent grid. Slack around a tight silhouette keeps its edge cells fully supervised.
+    mask_dilate_px: int = 0
+    mask_feather_px: float = 0.0
+
     # Train from cached latents alone, with the source images deleted. A sample is then
     # `<stem>_WWWWxHHHH_trainer.safetensors` + `<stem>.txt` (+ optional `<stem>_nl.txt`); buckets
     # come from the cache filenames rather than from measuring images. "auto" uses latents-only
@@ -115,6 +260,10 @@ class DatasetConfig:
     # resident in VRAM, to reproduce a tensor that never changes.
     cache_validation: str = "warn"  # warn permits legacy caches; strict requires provenance; off bypasses
     source: str = "auto"  # "images" | "latents" | "encode" | "auto"
+    # Storage precision for latents cached from this config (`cache_latents cache-config`, the
+    # GUI's Cache button). float16 halves the cache on disk; training reads either. Existing
+    # caches keep their precision -- `cache_latents convert` rewrites them in place.
+    latent_dtype: str = "float32"  # "float32" | "float16" | "bfloat16"
 
     # Only read when a curriculum phase has `mode = "texture"`. Nested under [dataset.texture].
     texture: TextureConfig = field(default_factory=TextureConfig)
@@ -125,19 +274,37 @@ class DatasetConfig:
         self.subsets = [
             s if isinstance(s, SubsetConfig) else SubsetConfig(**s) for s in self.subsets
         ]
-        if bool(self.path) == bool(self.subsets):
+        if self.subsets_root and not self.subsets_file:
+            raise ValueError("dataset.subsets_root only applies to dataset.subsets_file")
+        # The manifest is read on first use (`effective_subsets`), like every other dataset path:
+        # a config naming a folder that is not on this machine yet still loads, which is what
+        # lets configs travel between the laptop and the training box. Its rows are also kept off
+        # the dataclass fields -- the config is embedded in every checkpoint's metadata, and ten
+        # thousand expanded rows would be megabytes of it; the file path is recorded instead.
+        self._manifest = None
+        if bool(self.path) == bool(self.subsets or self.subsets_file):
             raise ValueError(
-                "dataset needs exactly one of `path` (single directory) or `subsets` "
-                "(a list of [[dataset.subsets]] tables), not "
+                "dataset needs exactly one of `path` (single directory) or `subsets` / "
+                "`subsets_file` (a list of folders), not "
                 + ("both" if self.path else "neither")
             )
-        seen = {}
-        for s in self.subsets:
-            if s.path in seen:
-                raise ValueError(
-                    f"dataset.subsets lists {s.path!r} twice; use num_repeats to weight it instead"
-                )
-            seen[s.path] = s
+        _check_duplicate_subsets(self.subsets)
+        if self.latent_dtype not in ("float32", "float16", "bfloat16"):
+            raise ValueError(f"dataset.latent_dtype must be float32, float16 or bfloat16, "
+                             f"got {self.latent_dtype!r}")
+        if self.mask_path and self.subsets:
+            raise ValueError(
+                "dataset.mask_path pairs with dataset.path; with [[dataset.subsets]] set mask_path "
+                "on each subset instead"
+            )
+        if not 0.0 <= self.mask_outside_weight <= 1.0:
+            raise ValueError(
+                f"dataset.mask_outside_weight must be in [0, 1], got {self.mask_outside_weight}"
+            )
+        if type(self.mask_dilate_px) is not int:
+            raise ValueError("dataset.mask_dilate_px must be an integer number of pixels")
+        if self.mask_feather_px < 0.0:
+            raise ValueError(f"dataset.mask_feather_px must be >= 0, got {self.mask_feather_px}")
         if self.tier_collapse not in ("dedup", "repeat"):
             raise ValueError(
                 f"dataset.tier_collapse must be 'dedup' or 'repeat', got {self.tier_collapse!r}"
@@ -164,9 +331,18 @@ class DatasetConfig:
         The single-`path` form is exactly a one-subset dataset carrying the top-level
         `num_repeats`, which is what keeps every existing config byte-identical in behaviour.
         """
-        if self.subsets:
-            return self.subsets
-        return [SubsetConfig(path=self.path, num_repeats=self.num_repeats, texture=True)]
+        if self.subsets_file and self._manifest is None:
+            self._manifest = load_subsets_file(self.subsets_file, self.subsets_root)
+            _check_duplicate_subsets([*self.subsets, *self._manifest])
+        if self.subsets or self._manifest:
+            return [*self.subsets, *(self._manifest or [])]
+        return [SubsetConfig(path=self.path, num_repeats=self.num_repeats, texture=True,
+                             mask_path=self.mask_path)]
+
+    @property
+    def masked(self) -> bool:
+        """Whether any sample carries a painted loss mask."""
+        return self.use_masks and any(s.mask_path for s in self.effective_subsets())
 
     @property
     def tiers(self) -> list[int]:
@@ -214,6 +390,9 @@ class ImageEntry:
     # False for entries from a `texture = false` subset: they stay fullres and keep their captions
     # even while the curriculum is in a texture phase. See `SubsetConfig`.
     texture_ok: bool = True
+    # Per-cell loss weights from the painted mask, (1, h/16, w/16) on this entry's bucket. None for
+    # an entry without one; it then trains at uniform weight.
+    mask: torch.Tensor | None = None
 
 
 @dataclass
@@ -276,11 +455,19 @@ class MageFlowDataset(Dataset):
         self.caption_seed = caption_seed
         self.texture_cfg = config.texture
         self.tier_report: TierReport | None = None
+        self.masked = config.masked
         self._scan()
 
     def _scan(self) -> None:
         subsets = self.config.effective_subsets()
-        resolved = [(s, self._resolve_source(Path(s.path))) for s in subsets]
+        workers = _scan_workers(len(subsets))
+        if workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(workers) as pool:
+                modes = list(pool.map(lambda s: self._resolve_source(Path(s.path)), subsets))
+            resolved = list(zip(subsets, modes))
+        else:
+            resolved = [(s, self._resolve_source(Path(s.path))) for s in subsets]
 
         # `auto` is resolved per directory, so two subsets can legitimately disagree -- but a batch
         # carries either `pixels` or `latents`, never both (`collate` picks one key), so a mixed
@@ -303,11 +490,24 @@ class MageFlowDataset(Dataset):
 
         reports: list[TierReport] = []
         self.subset_report: list[tuple[SubsetConfig, int]] = []
-        for sub, mode in resolved:
+        scanned = None
+        if workers > 1:
+            # Thousands of small per-artist folders are I/O-bound to scan (directory listings,
+            # image headers, cache stats), so threads overlap the waits. Results are merged in
+            # subset order below, so the entry list -- and with it every batch -- is identical to
+            # a sequential scan.
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(workers) as pool:
+                scanned = list(pool.map(lambda sm: self._scan_isolated(Path(sm[0].path), sm[1]),
+                                        resolved))
+        for i, (sub, mode) in enumerate(resolved):
             root = Path(sub.path)
             start = len(self.entries)
             self.tier_report = None   # so a subset's report can never be counted twice
-            if mode == "latents":
+            if scanned is not None:
+                self.entries.extend(scanned[i][0])
+                self.tier_report = scanned[i][1]
+            elif mode == "latents":
                 self._scan_latents(root)
             else:
                 self._scan_images(root)
@@ -315,6 +515,8 @@ class MageFlowDataset(Dataset):
             if not sub.texture:
                 for e in fresh:
                     e.texture_ok = False
+            if self.masked and sub.mask_path:
+                self._attach_masks(fresh, Path(sub.mask_path))
             # Per-subset repeats, applied to that subset's slice only. This is the knob that
             # balances a small regularization set against a large training set.
             if sub.num_repeats > 1:
@@ -325,6 +527,80 @@ class MageFlowDataset(Dataset):
 
         verify_max_resolution({e.bucket for e in self.entries})
         self.tier_report = _merge_tier_reports(reports)
+
+    def _scan_isolated(self, root: Path, mode: str):
+        """One subset's (entries, tier report), scanned on a private shallow copy so threads do
+        not share `entries`/`tier_report` -- or the bucket managers, whose `select_bucket` records
+        new resolutions as it goes."""
+        import copy
+
+        worker = copy.copy(self)
+        worker.entries = []
+        worker.tier_report = None
+        worker.bucket_managers = copy.deepcopy(self.bucket_managers)
+        if mode == "latents":
+            worker._scan_latents(root)
+        else:
+            worker._scan_images(root)
+        return worker.entries, worker.tier_report
+    def _attach_masks(self, entries: list[ImageEntry], root: Path) -> None:
+        """Give each entry its painted mask, cropped to the entry's own bucket.
+
+        Masks are built once here, not per step: they are tiny at latent resolution, and a missing
+        or mismatched mask should stop the run before the first step rather than hundreds in. The
+        crop is re-derived from the source size through the entry's tier manager -- the same
+        `select_bucket` call that chose the bucket -- so it matches cached latents exactly.
+        """
+        cfg = self.config
+        masks = find_masks(root)
+        missing: list[str] = []
+        empty: list[str] = []
+        for e in entries:
+            cached_name = parse_cache_filename(e.path)
+            if e.source_size != (0, 0):
+                # A latents-only entry can carry its source size too (taken from the cache metadata
+                # to attribute tiers); its path is then the cache file, named `<stem>_WxH_trainer`.
+                stem = cached_name[0] if cached_name else e.path.stem
+                size = e.source_size
+            else:
+                # Latents-only: the entry is the cache file, whose metadata carries the source size.
+                stem = parse_cache_filename(e.latent_path)[0]
+                size = parse_original_size(read_cache_metadata(e.latent_path))
+                if size is None:
+                    raise RuntimeError(
+                        f"{e.latent_path.name}: cached latent has no `original_size` metadata, "
+                        f"so its mask cannot be cropped to match. Re-cache it."
+                    )
+            mask_file = masks.get(stem)
+            if mask_file is None:
+                missing.append(stem)
+                continue
+            bucket, resized, _ = self.bucket_managers[e.resolution].select_bucket(*size)
+            if bucket != e.bucket:
+                raise RuntimeError(
+                    f"{stem}: re-derived bucket {bucket} differs from the entry's {e.bucket}; the "
+                    f"mask would not line up with its latent"
+                )
+            coverage = load_mask(mask_file, size, bucket, resized,
+                                 dilate_px=cfg.mask_dilate_px, feather_px=cfg.mask_feather_px)
+            if not coverage.any():
+                empty.append(stem)
+            e.mask = loss_weights(coverage, cfg.mask_outside_weight)
+
+        if missing:
+            raise ValueError(
+                f"mask folder {root} has no mask for {len(missing)} image(s) (matched by filename "
+                f"stem), e.g. {missing[:10]}. Every image needs one; paint missing ones white to "
+                f"train them unmasked."
+            )
+        if empty and cfg.mask_outside_weight == 0.0:
+            import warnings
+
+            warnings.warn(
+                f"{len(empty)} mask(s) in {root} are entirely black (e.g. {empty[:5]}); with "
+                f"mask_outside_weight = 0 those images train nothing.",
+                stacklevel=3,
+            )
 
     def _resolve_source(self, root: Path) -> str:
         if not root.exists():
@@ -423,6 +699,7 @@ class MageFlowDataset(Dataset):
                     ImageEntry(
                         path=p,  # the cache file itself; there may be no image any more
                         latent_path=p, bucket=bucket, tags=tags, nl=nl, resolution=tier,
+                        source_size=tuple(size) if size else (0, 0),   # layouts map boxes into the crop
                     )
                 )
 
@@ -616,8 +893,14 @@ class MageFlowDataset(Dataset):
 
         caption = (self.caption_variation_cache.caption(index, epoch)
                    if hasattr(self, "caption_variation_cache")
-                   else build_caption(e.tags, e.nl, self.config.caption, rng))
+                   else build_caption(e.tags, e.nl, self.config.caption, rng,
+                                      annotations_for(e, self.config.caption)))
         sample = {"caption": caption, "bucket": e.bucket, "path": str(e.path)}
+        if self.masked:
+            # An entry from an unmasked subset still carries a uniform mask, so every sample of a
+            # masked dataset has the key `collate` stacks.
+            sample["mask"] = (e.mask if e.mask is not None else
+                              torch.ones(1, e.bucket[1] // LATENT_SCALE, e.bucket[0] // LATENT_SCALE))
 
         if self.encode_on_the_fly:
             # Crop through the same helper the cacher uses, and against this entry's *own* tier's

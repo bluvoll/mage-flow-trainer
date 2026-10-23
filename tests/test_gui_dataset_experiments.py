@@ -198,7 +198,9 @@ def test_offload_cache_policy_roundtrip_and_gates(gui, tmp_path):
     assert cfg.dataset.cache_validation == 'strict'
     jobs = gui._cache_jobs(flat)
     argv = jobs[0].launch.argv
-    assert argv[argv.index('--cache-validation') + 1] == 'strict'
+    # The fork caches through `cache-config`, which reads the policy from the config it is given.
+    cache_cfg = load_config(argv[argv.index('cache-config') + 1])
+    assert cache_cfg.dataset.cache_validation == 'strict'
 
 
 @pytest.mark.parametrize('layout', ['auto', 'fused', 'separated'])

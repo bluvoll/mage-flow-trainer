@@ -2,6 +2,23 @@
 
 Train Mage-Flow adapters or finetune the full transformer through the GUI or CLI, with native model weights, native-resolution attention, and frozen Qwen3-VL text conditioning. Adapted from `diffusion-pipe-mageflow-ft` commit `40bf63a`, without requiring that checkout or DeepSpeed at runtime.
 
+## This fork (MageTrail)
+
+A fork of [bluvoll/mage-flow-trainer](https://github.com/bluvoll/mage-flow-trainer) for the MageTrail finetune. It adds the following, with upstream behaviour unchanged while each is off. See [docs/magetrail-features.md](docs/magetrail-features.md) for details, and [configs/mageflow-magetrail-finetune.toml](configs/mageflow-magetrail-finetune.toml) for a config using all of them.
+
+- **StageLR** (`schedule.kind = "stage"`): chained linear / cosine / constant / REX stages fitted exactly to the run, applied to every param group.
+- **Artist attribution:** `Drawn by <artist>` triggers kept intact through shuffle and dropout, for every credited artist, and written once in combined tags+NL captions.
+- **TensorBoard / wandb / Trackio**, any combination (`[tracking]`). Includes per-component LR, grad norm and throughput, and runs that resume.
+- **Validation samples during training** (`[sampling]`), with no resident text encoder and the work split across GPUs.
+- **Held-out eval loss** at fixed timestep quantiles (`[eval]`).
+- **Save now / Save & stop** from the GUI, or by touching `save` / `save_quit` in the run folder.
+- **Per-artist datasets:** `dataset.subsets_file` reads Illustration Scrapping Studio's export. The cache can be stored as float16 (`dataset.latent_dtype`, `cache_latents convert`), and `cache-config` caches every folder in one process.
+
+- **Remote training:** run the GUI on a laptop and train on a GPU box (Colab, JupyterHub, a rented pod). Paste the link the box prints, then Connect. See [docs/remote-training.md](docs/remote-training.md).
+- **Faster startup at scale:** rank 0 scans the dataset once and shares it with the other ranks, and thousands of subset folders are scanned in parallel.
+
+Trackers are optional: `pip install -r requirements-tracking.txt`.
+
 ## Why use this trainer?
 
 - **Native SDNQ integration:** train the full transformer with INT8 weight storage, or keep frozen base weights in INT8 while training adapters. Quantized optimizer state and state offloading are separate options. AdaLN is excluded from LoRA training.
@@ -443,6 +460,7 @@ See the [test and dtype audit](docs/bisque-finetune-smoke.md) and [full-finetuni
 
 - [Training and configuration guide](docs/training-guide.md)
 - [Caption variation cache](docs/caption-variation-cache.md)
+- [Masked training (painted loss masks)](docs/masked-training.md)
 - [SNR-gated HF and paired texture losses](docs/detail-losses.md)
 - [Experimental Flux3 text-to-image training](docs/flux3-experimental.md)
 - [Experimental MOSS-Image training](docs/moss-image-experimental.md)

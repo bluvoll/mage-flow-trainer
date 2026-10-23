@@ -31,16 +31,19 @@ from ..data.dataset import DatasetConfig
 from ..training.config import (
     AdapterConfig,
     ComponentLRs,
+    EvalConfig,
     FlowConfig,
     OptimizerConfig,
     PreserveConfig,
     QuantConfig,
     RTIConfig,
+    SamplingConfig,
     SelfFlowConfig,
     PerceptualConfig,
     EyeAdversarialConfig,
     PairedTextureConfig,
     ScheduleConfig,
+    TrackingConfig,
     TrainConfig,
     load_config,
 )
@@ -61,6 +64,9 @@ SECTIONS: dict[str, type] = {
     "component_lr": ComponentLRs,
     "rti": RTIConfig,
     "self_flow": SelfFlowConfig,
+    "tracking": TrackingConfig,
+    "sampling": SamplingConfig,
+    "eval": EvalConfig,
     "perceptual": PerceptualConfig,
     "adversarial": EyeAdversarialConfig,
     "paired_texture": PairedTextureConfig,
@@ -90,7 +96,9 @@ def schema() -> dict[str, dc.Field]:
 
 
 # Advanced TOML settings intentionally omitted from the Mage-Flow GUI.
-CLI_ONLY_KEYS = {"adapter.components", "adapter.init", "adapter.init_cache"} | {
+# `train.model_family` has one value since the trainer became Mage-Flow-only (auto resolves to it).
+CLI_ONLY_KEYS = {"adapter.components", "adapter.init", "adapter.init_cache",
+                 "train.model_family"} | {
     key for key in schema()
     if key.startswith(("preserve.", "component_lr.")) and key != "component_lr.adaln"
 }
@@ -189,12 +197,16 @@ def prune_defaults(flat: dict) -> dict:
         out.pop("dataset.resolution", None)
     else:
         out.pop("dataset.resolutions", None)
-    # Same rule, same reason: `path` and `subsets` are mutually exclusive in the loader, and the
-    # GUI keeps a value in the path box even after subsets are added. Emit the one in effect.
-    if out.get("dataset.subsets"):
+    # Same rule, same reason: `path` and `subsets` / `subsets_file` are mutually exclusive in the
+    # loader, and the GUI keeps a value in the path box even after subsets are added. Emit the one
+    # in effect.
+    if out.get("dataset.subsets") or out.get("dataset.subsets_file"):
         out.pop("dataset.path", None)
+        out.pop("dataset.mask_path", None)  # subsets carry their own mask folders
     else:
         out.pop("dataset.subsets", None)
+    if not out.get("dataset.subsets_file"):
+        out.pop("dataset.subsets_root", None)
     return out
 
 
@@ -248,12 +260,20 @@ def validate(flat: dict) -> tuple[bool, str]:
     the file distinguishes "explicitly set" from "left at the default". Validating the object would
     silently skip them.
     """
+    # The protected tags file usually lives on the machine that trains (a pod, or an @DATA_DIR@
+    # placeholder the notebook fills), so the GUI does not require it to exist here.
+    flat = {k: v for k, v in flat.items() if k != "dataset.caption.protected_tags_file"}
     text = dump_toml(flat)
     with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
         fh.write(text)
         tmp = fh.name
     try:
         load_config(tmp)
+        return True, ""
+    except ModuleNotFoundError:
+        # A GUI-only install (install --gui-only) lacks the training stack, e.g. diffusers, so the
+        # config cannot be fully checked here. Remote runs are validated on the machine that trains
+        # before they start, and a local run would fail at import anyway.
         return True, ""
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
@@ -291,6 +311,16 @@ def summarize(flat: dict) -> str:
             bits.append(f"sdnq {quant}/{flat.get('quant.weights_dtype', 'int8')}")
     if flat.get("train.compile"):
         bits.append(f"compile {flat['train.compile']}")
+    if flat.get("schedule.kind") == "stage":
+        bits.append(f"StageLR {len(flat.get('schedule.stages') or [])} stage(s)")
+    if flat.get("dataset.caption.attribution_patterns"):
+        bits.append("attribution")
+    if flat.get("tracking.backends"):
+        bits.append("+".join(flat["tracking.backends"]))
+    if flat.get("sampling.prompts"):
+        bits.append(f"{len(flat['sampling.prompts'])} sample prompt(s)")
+    if flat.get("eval.path"):
+        bits.append("eval")
     return "  ".join(bits)
 
 
@@ -341,6 +371,11 @@ def advisories(flat: dict, num_processes: int = 1) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     tex = _texture_phases(flat)
     n = max(1, int(num_processes))
+
+    from ..training.config import KAHAN_ADALN_WARNING, kahan_adaln_risk
+    if kahan_adaln_risk(flat.get("optimizer.kind", "adamw"), flat.get("optimizer.use_kahan"),
+                        flat.get("adapter.kind", "none"), flat.get("component_lr.adaln")):
+        out.append(("warn", KAHAN_ADALN_WARNING))
 
     if (flat.get("optimizer.kind") == "adafactor"
             and flat.get("optimizer.norm_mode") in (None, "relative")
