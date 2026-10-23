@@ -180,10 +180,11 @@ def load_components(
 
 @torch.no_grad()
 def encode_prompts(components, prompts, device, max_length=512, *, embedding_only=False):
-    if components.model_family == 'moss_image':
+    family = getattr(components, 'model_family', 'mage_flow')   # component bundles built by hand may omit it
+    if family == 'moss_image':
         from .moss_loader import encode_prompts as encode_moss
         return encode_moss(components, prompts, device, max_length)
-    if components.model_family == 'flux3':
+    if family == 'flux3':
         from .flux3_loader import encode_prompts as encode_flux3
         return encode_flux3(components, prompts, device, max_length)
     tokens = components.tokenizer(
