@@ -1321,14 +1321,23 @@ class Trainer:
         from ..modeling.export import export_checkpoint
         from ..modeling.checkpoint_metadata import optimizer_snapshot
 
+        # Batch size may vary by resolution tier. Keep that mapping in metadata
+        # rather than pretending all updates have a single effective batch size.
+        # These are configured full-batch sizes; partial/mixed-tier accumulation
+        # groups can contain different actual sample counts.
+        batch_scale = cfg.train.gradient_accumulation_steps * acc.num_processes
+        batch_size = cfg.train.batch_size
+        effective_batch_size = (
+            {tier: size * batch_scale for tier, size in batch_size.items()}
+            if isinstance(batch_size, dict) else batch_size * batch_scale
+        )
         runtime = optimizer_snapshot(self.optimizer)
         runtime.update(
             save_tag=tag,
             successful_updates=self.successful_updates, skipped_updates=self.skipped_updates,
             source_checkpoint=self.source_checkpoint,
             world_size=acc.num_processes,
-            effective_batch_size=(cfg.train.batch_size * cfg.train.gradient_accumulation_steps
-                                  * acc.num_processes),
+            effective_batch_size=effective_batch_size,
         )
         offloader = getattr(transformer, '_activation_offloader', None)
         if offloader is not None:
