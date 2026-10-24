@@ -23,9 +23,12 @@ class NativeResolutionBatchSampler(BucketBatchSampler):
 
 def collate_native(batch):
     key = "pixels" if "pixels" in batch[0] else "latents"
-    return {
+    out = {
         key: [item[key].unsqueeze(0) for item in batch],
         "captions": [item["caption"] for item in batch],
         "bucket": [item["bucket"] for item in batch],
         "paths": [item["path"] for item in batch],
     }
+    if "mask" in batch[0]:
+        out["mask"] = [item["mask"].unsqueeze(0) for item in batch]
+    return out

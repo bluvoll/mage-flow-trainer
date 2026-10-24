@@ -443,6 +443,7 @@ See the [test and dtype audit](docs/bisque-finetune-smoke.md) and [full-finetuni
 
 - [Training and configuration guide](docs/training-guide.md)
 - [Caption variation cache](docs/caption-variation-cache.md)
+- [Masked training (painted loss masks)](docs/masked-training.md)
 - [SNR-gated HF and paired texture losses](docs/detail-losses.md)
 - [Experimental Flux3 text-to-image training](docs/flux3-experimental.md)
 - [Experimental MOSS-Image training](docs/moss-image-experimental.md)

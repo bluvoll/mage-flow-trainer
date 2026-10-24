@@ -771,9 +771,12 @@ class SubsetEditor(_Blockable):
     The two are mutually exclusive in the loader, so `prune_defaults` drops `dataset.path` as soon
     as a row exists -- the GUI writes the file, so it resolves the conflict rather than handing
     back an error about a key the user cannot see.
+
+    The fourth column is the subset's painted loss-mask folder (`mask_path`); empty leaves that
+    folder unmasked. It is last so the first three keep their indexes.
     """
 
-    _HEADERS = ("Folder", "Repeats", "Texture crops")
+    _HEADERS = ("Folder", "Repeats", "Texture crops", "Masks")
 
     def __init__(self):
         w = QtWidgets.QWidget()
@@ -799,6 +802,7 @@ class SubsetEditor(_Blockable):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        head.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
         for i in (1, 2):
             head.setSectionResizeMode(i, QtWidgets.QHeaderView.ResizeMode.Fixed)
         head.resizeSection(1, 110)
@@ -824,7 +828,8 @@ class SubsetEditor(_Blockable):
         self.clear_btn.clicked.connect(self._clear)
         self.table.itemSelectionChanged.connect(self._update_remove_button)
 
-    def _make_row(self, path, num_repeats, texture, index):
+    @staticmethod
+    def _folder_cell(path):
         # A plain QLineEdit + button rather than a nested PathEditor. PathEditor is a QObject
         # wrapper around its widget; putting only the widget in a table cell leaves the wrapper
         # unreferenced, Python collects it, and Qt then owns a half-destroyed object -- which
@@ -847,6 +852,16 @@ class SubsetEditor(_Blockable):
             if chosen:
                 line.setText(chosen)
         browse.clicked.connect(_pick)
+        return holder_path, line, browse
+
+    def _make_row(self, path, num_repeats, texture, index, mask_path=""):
+        holder_path, line, browse = self._folder_cell(path)
+        holder_mask, mask_line, _ = self._folder_cell(mask_path)
+        mask_line.setPlaceholderText("unmasked")
+        mask_line.setToolTip(
+            "Optional folder of grayscale loss masks for this folder's images, matched by filename "
+            "stem. White = learn, black = weight dataset.mask_outside_weight. Empty = unmasked."
+        )
 
         reps = NoScrollSpinBox()
         reps.setLocale(QtCore.QLocale.c())
@@ -872,13 +887,15 @@ class SubsetEditor(_Blockable):
         self.table.setCellWidget(index, 0, holder_path)
         self.table.setCellWidget(index, 1, reps)
         self.table.setCellWidget(index, 2, holder)
+        self.table.setCellWidget(index, 3, holder_mask)
         self.table.setRowHeight(index, max(40, line.sizeHint().height() + 8,
                                            reps.sizeHint().height() + 8,
                                            browse.sizeHint().height() + 8))
         line.textChanged.connect(self._emit)
+        mask_line.textChanged.connect(self._emit)
         reps.valueChanged.connect(self._emit)
         tex.toggled.connect(self._emit)
-        return line, reps, tex
+        return line, reps, tex, mask_line
 
     def _add_row(self):
         i = self.table.rowCount()
@@ -919,6 +936,9 @@ class SubsetEditor(_Blockable):
             row["num_repeats"] = int(reps.value())
         if not tex.isChecked():
             row["texture"] = False
+        masks = self.table.cellWidget(i, 3).findChild(QtWidgets.QLineEdit).text().strip()
+        if masks:
+            row["mask_path"] = masks
         return row
 
     def get(self):
@@ -932,4 +952,4 @@ class SubsetEditor(_Blockable):
             i = self.table.rowCount()
             self.table.insertRow(i)
             self._make_row(sub.get("path", ""), sub.get("num_repeats", 1),
-                           sub.get("texture", True), i)
+                           sub.get("texture", True), i, sub.get("mask_path") or "")

@@ -380,6 +380,21 @@ def validate_model_options(cfg):
                                      or any(p.mode == 'texture' for p in cfg.curriculum.phases)):
         raise ValueError('Paired texture loss requires scalar timesteps and unmasked images; '
                          'dual timestep, Self-Flow and texture curriculum phases are unsupported')
+    if cfg.dataset.masked:
+        # Painted masks weight the per-cell flow (and HF) loss. The terms below compare whole
+        # decoded images or global feature statistics, so there is no per-pixel weight to give them;
+        # refused here rather than at the first batch, which the GUI never reaches.
+        unsupported = [name for name, on in (
+            ("paired_texture", bool(cfg.paired_texture.scale)), ("self_flow", cfg.self_flow.enabled),
+            ("perceptual", cfg.perceptual.enabled), ("adversarial", cfg.adversarial.enabled)) if on]
+        if unsupported:
+            raise ValueError(f"painted dataset masks weight the flow loss only and cannot be combined "
+                             f"with {', '.join(unsupported)}; disable it or set dataset.use_masks = false")
+        if (any(p.mode == 'texture' for p in cfg.curriculum.phases)
+                and any(s.mask_path and s.texture for s in cfg.dataset.effective_subsets())):
+            raise ValueError("texture crops are cut per step from the source and do not carry painted "
+                             "masks; list masked folders as [[dataset.subsets]] with texture = false, "
+                             "or drop the texture curriculum phases")
     if cfg.adversarial.enabled and (not cfg.perceptual.enabled
                                     or not cfg.perceptual.dedicated_low_noise
                                     or cfg.perceptual.weight != 0):

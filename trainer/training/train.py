@@ -689,8 +689,8 @@ class Trainer:
         )[0]
 
         # (B,1,h,w) -> (B,1,1,h,w) to broadcast over the latent's channel and time axes. Texture
-        # batches supervise only a feathered sub-region; the rest is real context that conditions
-        # the forward pass but carries no target.
+        # batches supervise only a feathered sub-region, and painted dataset masks weight it per
+        # image; the rest is real context that conditions the forward pass but carries no target.
         mask = batch.get("mask")
         if mask is not None:
             mask = mask.to(device, torch.float32).unsqueeze(2)
@@ -790,10 +790,15 @@ class Trainer:
             **({"second_timestep": torch.cat(second_times).to(self.dtype),
                 "timestep_mask": token_masks} if self.cfg.flow.dual_timestep else {}),
             **({"keep_fraction": self.keep_fraction} if self.rti_interface is not None else {}))[0]
+        # Painted loss masks, (1,1,h,w) per sample -> (1,1,1,h,w). Each sample's loss is its own
+        # mask-weighted mean, so equal sample weighting holds for masked images too.
+        masks = [None] * ordinary_count
+        if batch.get("mask") is not None:
+            masks = [m.to(device, torch.float32).unsqueeze(2) for m in batch["mask"]]
         # Equal sample weighting: a large image must not gain extra influence merely
         # because it contributes more tokens to the packed attention kernel.
-        loss = torch.stack([flow_loss(y,t) for y,t in
-                            zip(predictions[:ordinary_count],targets[:ordinary_count])]).mean()
+        loss = torch.stack([flow_loss(y,t,mask=m) for y,t,m in
+                            zip(predictions[:ordinary_count],targets[:ordinary_count],masks)]).mean()
         if dedicated:
             # Keep ordinary loss unchanged; extra example has one full-batch sample's weight.
             loss = loss + flow_loss(predictions[-1],targets[-1])/self.cfg.train.batch_size
@@ -822,8 +827,9 @@ class Trainer:
             return loss,None
         hf = self.cfg.flow.hf_scale * torch.stack([
             hf_loss(y,n,x,effective_timesteps(t,s,m),self.hf_patch,self.cfg.flow.hf_exponent,
-                    **self.cfg.flow.hf_gate_kwargs())
-            for y,n,x,t,s,m in zip(predictions,noisy,latents,times,second_times,token_masks)]).mean()
+                    mask=lm,**self.cfg.flow.hf_gate_kwargs())
+            for y,n,x,t,s,m,lm in zip(predictions,noisy,latents,times,second_times,token_masks,
+                                      masks + [None] * (len(predictions) - ordinary_count))]).mean()
         return loss+hf,hf
 
     def _preserve_term(self) -> torch.Tensor | float:
@@ -1157,6 +1163,12 @@ class Trainer:
             self.transformer,
         )
         print(f"\ndataset  {len(self.dataset)} samples, {len(self.sampler.bucket_indices)} buckets")
+        if getattr(self.dataset, "masked", False):
+            d = cfg.dataset
+            n_masked = sum(e.mask is not None for e in self.dataset.entries)
+            print(f"masks    {n_masked}/{len(self.dataset)} samples painted, outside weight "
+                  f"{d.mask_outside_weight:g}, dilate {d.mask_dilate_px}px, feather "
+                  f"{d.mask_feather_px:g}px")
         subsets = getattr(self.dataset, "subset_report", [])
         if len(subsets) > 1:
             # Worth printing even though it is configured: a subset's share of the epoch is
@@ -1165,6 +1177,8 @@ class Trainer:
             total = max(1, len(self.dataset))
             for sub, n in subsets:
                 flag = "" if sub.texture else "  [fullres only -- keeps its captions]"
+                if sub.mask_path and cfg.dataset.use_masks:
+                    flag += "  [masked]"
                 print(f"         {Path(sub.path).name:<24} {n:>6} entries  {100 * n / total:4.1f}% "
                       f"of the epoch  x{sub.num_repeats}{flag}")
         if self.dataset.tier_report is not None:

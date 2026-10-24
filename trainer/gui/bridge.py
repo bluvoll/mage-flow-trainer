@@ -193,6 +193,7 @@ def prune_defaults(flat: dict) -> dict:
     # GUI keeps a value in the path box even after subsets are added. Emit the one in effect.
     if out.get("dataset.subsets"):
         out.pop("dataset.path", None)
+        out.pop("dataset.mask_path", None)  # subsets carry their own mask folders
     else:
         out.pop("dataset.subsets", None)
     return out

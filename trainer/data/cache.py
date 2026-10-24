@@ -14,6 +14,7 @@ from PIL import Image
 from safetensors.torch import load_file
 
 from .bucket import BucketManager
+from .masks import center_crop_box
 
 Image.MAX_IMAGE_PIXELS = None  # dataset images legitimately exceed the decompression-bomb guard
 
@@ -47,15 +48,14 @@ def load_and_crop(image_path: str | Path, bucket_mgr: BucketManager) -> tuple[Im
     if bucket[0] <= 0 or bucket[1] <= 0:
         raise ValueError(f"{image_path}: degenerate bucket {bucket} for source {w}x{h}")
 
-    img = img.resize(resized, Image.LANCZOS)
-    left = (resized[0] - bucket[0]) // 2
-    top = (resized[1] - bucket[1]) // 2
-    img = img.crop((left, top, left + bucket[0], top + bucket[1]))
+    # The box is shared with `masks.load_mask`, which must crop a painted mask exactly like this.
+    box = center_crop_box(resized, bucket)
+    img = img.resize(resized, Image.LANCZOS).crop(box)
 
     return img, {
         "bucket": bucket,
         "original_size": (w, h),
-        "crop_ltrb": (left, top, left + bucket[0], top + bucket[1]),
+        "crop_ltrb": box,
         "ar_error": ar_error,
     }
 

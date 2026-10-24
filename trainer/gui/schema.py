@@ -327,6 +327,35 @@ SPEC: dict[str, Spec] = {
     "dataset.num_repeats": _spec(
         "Repeats", "Multiplies every entry. Stacks on top of the tier cross product.",
         lambda: F.IntEditor(1, 100)),
+    "dataset.mask_path": _spec(
+        "Mask folder",
+        "Grayscale loss masks for the Dataset directory, one per image, matched by filename stem "
+        "(img_001.png -> img_001.png here). White = learn this region, black = do not, grey = in "
+        "between. The whole image still conditions the model; only the training target is "
+        "weighted, so a character can be learned without its backgrounds.\n\nEvery image needs a "
+        "mask once this is set. With Dataset subsets, set the Masks column per folder instead. "
+        "Empty = unmasked.",
+        lambda: F.PathEditor("folder")),
+    "dataset.use_masks": _spec(
+        "Use masks",
+        "Off trains unmasked without clearing the mask folders, for an A/B against the same config.",
+        lambda: F.BoolEditor("Apply the painted loss masks"), inline_label=True),
+    "dataset.mask_outside_weight": _spec(
+        "Outside weight",
+        "Loss weight where a mask is black. 0 ignores those pixels entirely; 0.1-0.3 keeps a "
+        "little supervision on the background; 1 is the same as no mask.",
+        lambda: F.FloatEditor(0.0, 1.0, 0.05, 2)),
+    "dataset.mask_dilate_px": _spec(
+        "Grow (px)",
+        "Grow every mask by this many pixels at bucket resolution before it is reduced to the "
+        "16x latent grid; negative shrinks. A mask painted tight to a silhouette leaves its edge "
+        "half-supervised -- a few pixels of slack hands it back.",
+        lambda: F.IntEditor(-256, 256)),
+    "dataset.mask_feather_px": _spec(
+        "Feather (px)",
+        "Gaussian-soften every mask edge, in bucket pixels, after growing. A hard edge between "
+        "learned and ignored regions can train as a seam; about half the grow value is a sane start.",
+        lambda: F.FloatEditor(0.0, 128.0, 0.5, 1)),
 
     # ------------------------------------------------------------------ texture crops
     "curriculum": _spec(
@@ -733,6 +762,10 @@ LAYOUT: list[tuple[str, list[tuple[str, list[str]]]]] = [
     ("Dataset", [
         ("Dataset Source", [
             "dataset.path", "dataset.source", "dataset.cache_validation", "dataset.num_repeats", "dataset.subsets",
+        ]),
+        ("Loss Masks", [
+            "dataset.mask_path", "dataset.use_masks", "dataset.mask_outside_weight",
+            "dataset.mask_dilate_px", "dataset.mask_feather_px",
         ]),
         ("Resolution", [
             "dataset.resolution", "dataset.resolutions", "dataset.tier_collapse",

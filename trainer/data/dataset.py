@@ -21,6 +21,7 @@ from torch.utils.data import Dataset, Sampler
 from .bucket import BucketManager, verify_max_resolution
 from .caption import CaptionConfig, build_caption, read_caption_files
 from .texture import TextureConfig, fitting_canvases
+from .masks import LATENT_SCALE, find_masks, load_mask, loss_weights
 from .cache import (
     CACHE_SUFFIX,
     cache_path,
@@ -28,6 +29,7 @@ from .cache import (
     image_to_tensor,
     load_and_crop,
     load_cached_latent,
+    parse_cache_filename,
     parse_original_size,
     read_cache_metadata,
 )
@@ -69,6 +71,9 @@ class SubsetConfig:
     path: str
     num_repeats: int = 1
     texture: bool = True
+    # Folder of painted loss masks for this subset's images, matched by filename stem. See
+    # `DatasetConfig.mask_path`; unset leaves the subset unmasked.
+    mask_path: str | None = None
 
     def __post_init__(self):
         if self.num_repeats < 1:
@@ -104,6 +109,20 @@ class DatasetConfig:
     num_repeats: int = 1
     caption: CaptionConfig = field(default_factory=CaptionConfig)
 
+    # Painted loss masks (`masks.py`): a grayscale image per training image, matched by filename
+    # stem, white = learn this region. `mask_path` pairs with `path`; with `subsets`, each subset
+    # names its own. Once a folder is set every image in it needs a mask -- a stem mismatch that
+    # silently left most of a dataset unmasked would look exactly like a run that worked.
+    mask_path: str | None = None
+    # Off trains unmasked without clearing the folders, for an A/B against the same config.
+    use_masks: bool = True
+    # Loss weight where the mask is black. 0 ignores those pixels entirely; 1 is unmasked training.
+    mask_outside_weight: float = 0.0
+    # Grow (negative: shrink) and Gaussian-soften every mask, in bucket pixels, before it is reduced
+    # to the latent grid. Slack around a tight silhouette keeps its edge cells fully supervised.
+    mask_dilate_px: int = 0
+    mask_feather_px: float = 0.0
+
     # Train from cached latents alone, with the source images deleted. A sample is then
     # `<stem>_WWWWxHHHH_trainer.safetensors` + `<stem>.txt` (+ optional `<stem>_nl.txt`); buckets
     # come from the cache filenames rather than from measuring images. "auto" uses latents-only
@@ -138,6 +157,19 @@ class DatasetConfig:
                     f"dataset.subsets lists {s.path!r} twice; use num_repeats to weight it instead"
                 )
             seen[s.path] = s
+        if self.mask_path and self.subsets:
+            raise ValueError(
+                "dataset.mask_path pairs with dataset.path; with [[dataset.subsets]] set mask_path "
+                "on each subset instead"
+            )
+        if not 0.0 <= self.mask_outside_weight <= 1.0:
+            raise ValueError(
+                f"dataset.mask_outside_weight must be in [0, 1], got {self.mask_outside_weight}"
+            )
+        if type(self.mask_dilate_px) is not int:
+            raise ValueError("dataset.mask_dilate_px must be an integer number of pixels")
+        if self.mask_feather_px < 0.0:
+            raise ValueError(f"dataset.mask_feather_px must be >= 0, got {self.mask_feather_px}")
         if self.tier_collapse not in ("dedup", "repeat"):
             raise ValueError(
                 f"dataset.tier_collapse must be 'dedup' or 'repeat', got {self.tier_collapse!r}"
@@ -166,7 +198,13 @@ class DatasetConfig:
         """
         if self.subsets:
             return self.subsets
-        return [SubsetConfig(path=self.path, num_repeats=self.num_repeats, texture=True)]
+        return [SubsetConfig(path=self.path, num_repeats=self.num_repeats, texture=True,
+                             mask_path=self.mask_path)]
+
+    @property
+    def masked(self) -> bool:
+        """Whether any sample carries a painted loss mask."""
+        return self.use_masks and any(s.mask_path for s in self.effective_subsets())
 
     @property
     def tiers(self) -> list[int]:
@@ -214,6 +252,9 @@ class ImageEntry:
     # False for entries from a `texture = false` subset: they stay fullres and keep their captions
     # even while the curriculum is in a texture phase. See `SubsetConfig`.
     texture_ok: bool = True
+    # Per-cell loss weights from the painted mask, (1, h/16, w/16) on this entry's bucket. None for
+    # an entry without one; it then trains at uniform weight.
+    mask: torch.Tensor | None = None
 
 
 @dataclass
@@ -276,6 +317,7 @@ class MageFlowDataset(Dataset):
         self.caption_seed = caption_seed
         self.texture_cfg = config.texture
         self.tier_report: TierReport | None = None
+        self.masked = config.masked
         self._scan()
 
     def _scan(self) -> None:
@@ -315,6 +357,8 @@ class MageFlowDataset(Dataset):
             if not sub.texture:
                 for e in fresh:
                     e.texture_ok = False
+            if self.masked and sub.mask_path:
+                self._attach_masks(fresh, Path(sub.mask_path))
             # Per-subset repeats, applied to that subset's slice only. This is the knob that
             # balances a small regularization set against a large training set.
             if sub.num_repeats > 1:
@@ -325,6 +369,61 @@ class MageFlowDataset(Dataset):
 
         verify_max_resolution({e.bucket for e in self.entries})
         self.tier_report = _merge_tier_reports(reports)
+
+    def _attach_masks(self, entries: list[ImageEntry], root: Path) -> None:
+        """Give each entry its painted mask, cropped to the entry's own bucket.
+
+        Masks are built once here, not per step: they are tiny at latent resolution, and a missing
+        or mismatched mask should stop the run before the first step rather than hundreds in. The
+        crop is re-derived from the source size through the entry's tier manager -- the same
+        `select_bucket` call that chose the bucket -- so it matches cached latents exactly.
+        """
+        cfg = self.config
+        masks = find_masks(root)
+        missing: list[str] = []
+        empty: list[str] = []
+        for e in entries:
+            if e.source_size != (0, 0):
+                stem, size = e.path.stem, e.source_size
+            else:
+                # Latents-only: the entry is the cache file, whose metadata carries the source size.
+                stem = parse_cache_filename(e.latent_path)[0]
+                size = parse_original_size(read_cache_metadata(e.latent_path))
+                if size is None:
+                    raise RuntimeError(
+                        f"{e.latent_path.name}: cached latent has no `original_size` metadata, "
+                        f"so its mask cannot be cropped to match. Re-cache it."
+                    )
+            mask_file = masks.get(stem)
+            if mask_file is None:
+                missing.append(stem)
+                continue
+            bucket, resized, _ = self.bucket_managers[e.resolution].select_bucket(*size)
+            if bucket != e.bucket:
+                raise RuntimeError(
+                    f"{stem}: re-derived bucket {bucket} differs from the entry's {e.bucket}; the "
+                    f"mask would not line up with its latent"
+                )
+            coverage = load_mask(mask_file, size, bucket, resized,
+                                 dilate_px=cfg.mask_dilate_px, feather_px=cfg.mask_feather_px)
+            if not coverage.any():
+                empty.append(stem)
+            e.mask = loss_weights(coverage, cfg.mask_outside_weight)
+
+        if missing:
+            raise ValueError(
+                f"mask folder {root} has no mask for {len(missing)} image(s) (matched by filename "
+                f"stem), e.g. {missing[:10]}. Every image needs one; paint missing ones white to "
+                f"train them unmasked."
+            )
+        if empty and cfg.mask_outside_weight == 0.0:
+            import warnings
+
+            warnings.warn(
+                f"{len(empty)} mask(s) in {root} are entirely black (e.g. {empty[:5]}); with "
+                f"mask_outside_weight = 0 those images train nothing.",
+                stacklevel=3,
+            )
 
     def _resolve_source(self, root: Path) -> str:
         if not root.exists():
@@ -618,6 +717,11 @@ class MageFlowDataset(Dataset):
                    if hasattr(self, "caption_variation_cache")
                    else build_caption(e.tags, e.nl, self.config.caption, rng))
         sample = {"caption": caption, "bucket": e.bucket, "path": str(e.path)}
+        if self.masked:
+            # An entry from an unmasked subset still carries a uniform mask, so every sample of a
+            # masked dataset has the key `collate` stacks.
+            sample["mask"] = (e.mask if e.mask is not None else
+                              torch.ones(1, e.bucket[1] // LATENT_SCALE, e.bucket[0] // LATENT_SCALE))
 
         if self.encode_on_the_fly:
             # Crop through the same helper the cacher uses, and against this entry's *own* tier's

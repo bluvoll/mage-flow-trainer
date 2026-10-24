@@ -47,6 +47,8 @@ The cacher loads only the VAE. It uses posterior means, discards the unused deco
 
 `resolution` is an area budget; `max_bucket_reso` limits each side. Bucketing still resizes/crops images to the selected dimensions.
 
+`dataset.mask_path` (or `mask_path` per subset) adds painted loss masks: a grayscale image per training image, matched by filename stem, white = learn. Masks follow each image's crop and weight the flow loss without re-caching; see [masked training](masked-training.md).
+
 ## Cached text and encoder offloading
 
 Set `train.cache_text_embeddings=true` to unload Qwen3-VL **before** loading the transformer. With `train.caption_variations=0`, fixed captions are cached in RAM each launch and augmentation must be off. With a positive variation count, augmented caption slots and deduplicated embeddings persist in SQLite and are read on demand. See [caption variation caching](caption-variation-cache.md). Texture curricula and preservation probes are rejected in either cache mode.
